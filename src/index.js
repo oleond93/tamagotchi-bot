@@ -21,14 +21,6 @@ function dpart(env) {
 // Кулдаун між подіями (год). Після події кнопка «Подія» тимчасово «відпочиває».
 const EVENT_COOLDOWN_H = 2;
 
-function humanDur(sec) {
-  const m = Math.ceil(sec / 60);
-  if (m < 60) return `${m} хв`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return mm ? `${h} год ${mm} хв` : `${h} год`;
-}
-
 // Сповіщає про перехід на нову стадію (включно з вилупленням). Безпечно
 // викликати скрізь — святкує лише те, про що ще не сповіщали.
 async function celebrateEvolutions(env, chatId, pet) {
@@ -402,7 +394,7 @@ async function handleCallback(env, cq) {
       await answerCb(
         env,
         cq.id,
-        `🎲 Наступна пригода буде за ${humanDur(cd - since)}. Дай трохи перепочити!`,
+        "🎲 Зараз нічого цікавого не сталося... Можливо, пригода чекає трохи згодом 👀",
         true
       );
       return;
