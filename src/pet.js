@@ -75,6 +75,16 @@ const ACTION_AFFINITY = {
   meditate: { philosopher: 1 },
 };
 
+// Поріг середнього тепла → вдача. Спільне для фіналу (computeTemperament)
+// та для «передчуття» по ходу (eggTemperamentTrajectory).
+function temperamentFromWarmth(avg) {
+  if (avg >= 85) return "angelic";
+  if (avg >= 68) return "gentle";
+  if (avg >= 50) return "balanced";
+  if (avg >= 32) return "feisty";
+  return "wild";
+}
+
 // Вдача — визначається якістю догляду за яйцем (середнє тепло). Впливає на
 // те, як улюбленець спілкується (LLM) та як він підписаний у картці.
 export const TEMPERAMENTS = {
@@ -195,11 +205,15 @@ export class Pet {
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
   computeTemperament() {
     const avg = this.egg_hours > 0 ? this.egg_warm_sum / this.egg_hours : 70;
-    if (avg >= 85) return "angelic";
-    if (avg >= 68) return "gentle";
-    if (avg >= 50) return "balanced";
-    if (avg >= 32) return "feisty";
-    return "wild";
+    return temperamentFromWarmth(avg);
+  }
+
+  // Поточна «траєкторія» вдачі, поки це ще яйце — для передчуття в картці.
+  // Орієнтується на накопичене середнє тепло (а спочатку — на поточне);
+  // ще не зафіксована й може зсунутись від подальшого догляду.
+  eggTemperamentTrajectory() {
+    const avg = this.egg_hours > 0 ? this.egg_warm_sum / this.egg_hours : this.warmth;
+    return temperamentFromWarmth(avg);
   }
 
   // Щойно перестали бути яйцем — закріпити вдачу (від догляду) і завести характер.
@@ -589,7 +603,7 @@ export class Pet {
       const warm = Math.round(this.warmth);
       return (
         `${emoji} <b>${this.name}</b> · <i>Яйце</i>${streakLine}\n` +
-        `🔮 Передчуття: воно буде <b>${eggMystery(this.name)}</b>` +
+        `🔮 Передчуття: воно буде <b>${eggMystery(this.eggTemperamentTrajectory(), this.name)}</b>` +
         DIV +
         `${this.eggSign()}` +
         DIV +
