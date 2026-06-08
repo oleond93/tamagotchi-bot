@@ -60,6 +60,36 @@ const STAT_ACTION = Object.fromEntries(
   Object.entries(ACTIONS).map(([k, v]) => [v.stat, k])
 );
 
+// Вдача — визначається якістю догляду за яйцем (середнє тепло). Впливає на
+// те, як улюбленець спілкується (LLM) та як він підписаний у картці.
+export const TEMPERAMENTS = {
+  angelic: {
+    label: "😇 Янгол",
+    reveal: "Стільки тепла й турботи! Він виріс 😇 <b>Янголом</b> 💛",
+    prompt: "ВДАЧА: ти неймовірно лагідний, ніжний і вдячний — обожнюєш власника й щиро дбаєш про нього у відповідь.",
+  },
+  gentle: {
+    label: "🥰 Лагідне",
+    reveal: "Ти добре дбав — він виріс 🥰 <b>Лагідним</b>!",
+    prompt: "ВДАЧА: ти добрий і ласкавий, легко радієш, рідко сердишся.",
+  },
+  balanced: {
+    label: "😌 Врівноважене",
+    reveal: "Виріс 😌 <b>Врівноваженим</b> — спокійним, без крайнощів.",
+    prompt: "ВДАЧА: ти спокійний і врівноважений, без емоційних крайнощів.",
+  },
+  feisty: {
+    label: "😼 Норовливе",
+    reveal: "Бракувало трохи тепла — і він став 😼 <b>Норовливим</b> 😏",
+    prompt: "ВДАЧА: ти норовливий і пустотливий, любиш капостити та дражнитися — але по-доброму.",
+  },
+  wild: {
+    label: "😈 Дике",
+    reveal: "Йому часто було холодно... тож він став 😈 <b>Диким</b>!",
+    prompt: "ВДАЧА: ти дике, непокірне й кусюче — бурчиш, огризаєшся, ледь визнаєш власника, хоч глибоко всередині прив'язаний.",
+  },
+};
+
 // Стадії еволюції: [вік у днях, назва, емодзі, опис].
 const EVOLUTION_STAGES = [
   [0, "Яйце", "🥚", "тремтить і чогось чекає"],
@@ -100,6 +130,38 @@ export class Pet {
     // Стадія, про яку власника вже сповістили. Для існуючих улюбленців
     // (без поля) backfill до поточної — щоб не спамити святкуваннями заднім числом.
     this.seen_stage = d.seen_stage ?? this.evolutionInfo().index;
+    // Накопичення якості догляду за яйцем (для визначення вдачі) + сама вдача.
+    this.egg_warm_sum = d.egg_warm_sum ?? 0; // Σ тепло·години
+    this.egg_hours = d.egg_hours ?? 0; //       Σ години у стадії яйця
+    this.temperament = d.temperament ?? null; // фіксується при вилупленні
+  }
+
+  // Вдача за середнім теплом, яке яйце мало до вилуплення.
+  computeTemperament() {
+    const avg = this.egg_hours > 0 ? this.egg_warm_sum / this.egg_hours : 70;
+    if (avg >= 85) return "angelic";
+    if (avg >= 68) return "gentle";
+    if (avg >= 50) return "balanced";
+    if (avg >= 32) return "feisty";
+    return "wild";
+  }
+
+  // Зафіксувати вдачу, щойно перестали бути яйцем (одноразово).
+  finalizeTemperament() {
+    if (this.temperament || this.isEgg()) return;
+    this.temperament = this.computeTemperament();
+  }
+
+  temperamentLabel() {
+    return this.temperament ? TEMPERAMENTS[this.temperament].label : "";
+  }
+
+  temperamentReveal() {
+    return this.temperament ? TEMPERAMENTS[this.temperament].reveal : "";
+  }
+
+  temperamentStyle() {
+    return this.temperament ? TEMPERAMENTS[this.temperament].prompt : "";
   }
 
   // Святкове повідомлення про перехід на стадію idx (1 = вилуплення).
@@ -113,10 +175,12 @@ export class Pet {
       .map((s) => `${STAT_META[s][1]} ${STAT_META[s][0]}`);
     const unlockedTxt = unlocked.length ? `\n🔓 Відкрито: ${unlocked.join(", ")}` : "";
     if (idx === 1) {
+      const reveal = this.temperamentReveal();
       return (
         "💥💥💥 <b>ШКАРАЛУПА ТРІСНУЛА!</b>\n\n" +
         `🎉 <b>${this.name} вилупився!</b>\n` +
-        `Тепер це ${semoji} <i>${sname}</i> — ${desc}.${unlockedTxt}`
+        `Тепер це ${semoji} <i>${sname}</i> — ${desc}.${unlockedTxt}` +
+        (reveal ? `\n\n${reveal}` : "")
       );
     }
     return (
@@ -171,17 +235,27 @@ export class Pet {
   applyDecay() {
     if (!this.alive) return;
     const elapsedH = (now() - this.last_update) / 3600;
-    if (elapsedH <= 0) return;
-    // Занепадають лише активні на цій стадії характеристики.
-    for (const stat of this.activeStats()) {
-      this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * elapsedH);
+    if (elapsedH > 0) {
+      const wasEgg = this.isEgg();
+      const beforeWarmth = this.warmth;
+      // Занепадають лише активні на цій стадії характеристики.
+      for (const stat of this.activeStats()) {
+        this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * elapsedH);
+      }
+      // Поки яйце — накопичуємо середньозважене тепло (для майбутньої вдачі).
+      if (wasEgg) {
+        this.egg_warm_sum += ((beforeWarmth + this.warmth) / 2) * elapsedH;
+        this.egg_hours += elapsedH;
+      }
+      this.last_update = now();
+      // "Смерть" можлива лише коли психіка вже є (стадія підлітка+) і все на нулі.
+      const act = this.activeStats();
+      if (act.includes("sanity") && this.hunger <= 0 && this.sanity <= 0) {
+        this.alive = false;
+      }
     }
-    this.last_update = now();
-    // "Смерть" можлива лише коли психіка вже є (стадія підлітка+) і все на нулі.
-    const act = this.activeStats();
-    if (act.includes("sanity") && this.hunger <= 0 && this.sanity <= 0) {
-      this.alive = false;
-    }
+    // Якщо щойно вилупилось — закріпити вдачу.
+    this.finalizeTemperament();
   }
 
   doAction(action) {
@@ -371,8 +445,9 @@ export class Pet {
       return `${em} ${label} ${dot(v)}\n<code>${bar(v)}</code> <b>${v}%</b>`;
     });
     const tod = ctx.dayPart ? `  ·  ${ctx.dayPart.emoji}` : "";
+    const temper = this.temperament ? `\n🧬 Вдача: ${this.temperamentLabel()}` : "";
     const header =
-      `${emoji} <b>${this.name}</b> · <i>${name}</i>\n` +
+      `${emoji} <b>${this.name}</b> · <i>${name}</i>${temper}\n` +
       `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}\n` +
       `${this.reactionBubble(ctx)}`;
     if (!this.alive) {
@@ -403,6 +478,9 @@ export class Pet {
       counts: this.counts,
       achievements: this.achievements,
       seen_stage: this.seen_stage,
+      egg_warm_sum: this.egg_warm_sum,
+      egg_hours: this.egg_hours,
+      temperament: this.temperament,
     };
   }
 }

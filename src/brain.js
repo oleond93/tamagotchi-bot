@@ -43,6 +43,8 @@ function stateContext(pet) {
 function systemPrompt(pet, dayPart) {
   const p = PERSONALITIES[pet.personality] || PERSONALITIES.gremlin;
   let s = p.prompt;
+  const temper = pet.temperamentStyle();
+  if (temper) s += "\n\n" + temper;
   s += "\n\nСТИЛЬ МОВЛЕННЯ (залежить від твоєї стадії розвитку — суворо дотримуйся!):\n" + pet.speechStyle();
   if (dayPart) s += "\n\nПОРА ДОБИ: " + dayPart.note;
   s += "\n\nКОНТЕКСТ ТВОГО СТАНУ:\n" + stateContext(pet);
