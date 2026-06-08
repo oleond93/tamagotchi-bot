@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐣 Тамагочі-бот — повна схема гри</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1220; --card:#1a1f33; --card2:#222942; --line:#2e3656;
+    --txt:#e6e9f5; --mut:#9aa3c7; --acc:#7c5cff; --good:#3ecf8e; --warn:#f5c451; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.5}
+  header{padding:28px 22px;background:linear-gradient(135deg,#1b1f3a,#2a1f4d);border-bottom:1px solid var(--line)}
+  header h1{margin:0 0 6px;font-size:26px}
+  header p{margin:0;color:var(--mut)}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px}
+  h2{font-size:20px;margin:34px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--acc);display:inline-block}
+  h3{font-size:15px;color:var(--mut);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  code{background:#000a;padding:2px 6px;border-radius:5px;font-size:13px;color:#cdd3f5}
+  .pos{color:var(--good)} .neg{color:var(--bad)} .neu{color:var(--warn)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+  .pill{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin:3px 4px 3px 0;font-size:13px}
+  .legend{font-size:13px;color:var(--mut);margin:8px 0}
+  .mermaid{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;overflow:auto}
+  .note{font-size:13px;color:var(--mut);background:#0008;border-left:3px solid var(--acc);padding:8px 12px;border-radius:6px;margin:10px 0}
+  .tag{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
+  .sec-stat{color:#7cc7ff}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐣 Тамагочі-бот — повна схема гри</h1>
+  <p>Усе, що на що впливає й чим зав'язане. Згенеровано зі стану коду · Cloudflare Worker</p>
+</header>
+<div class="wrap">
+
+<h2>🗺️ Загальна схема зв'язків</h2>
+<div class="note">Стрілки = «впливає на / визначає». Якщо діаграма не показалась — потрібен інтернет (бібліотека Mermaid з CDN). Усі таблиці нижче працюють і без інтернету.</div>
+<div class="mermaid">
+flowchart TD
+  classDef act fill:#2a3a5e,stroke:#7c5cff,color:#fff;
+  classDef state fill:#1f3a30,stroke:#3ecf8e,color:#fff;
+  classDef out fill:#3a2a4e,stroke:#b07cff,color:#fff;
+  classDef sys fill:#3a3320,stroke:#f5c451,color:#fff;
+  classDef bad fill:#3a2020,stroke:#ff6b6b,color:#fff;
+
+  TIME([⏳ Час іде]):::sys --> DECAY[📉 Занепад показників]:::sys
+  DAY{🌗 Пора доби}:::sys -->|"ніч 22-08: ×0.18"| DECAY
+  DECAY --> STATS[("📊 Показники<br/>тепло·їжа·сон·настрій...")]:::state
+
+  A1[🔘 Кнопки догляду]:::act -->|відновлюють| STATS
+  A3[🎲 Події]:::act -->|ефекти ±| STATS
+  A3 --> FLAGS[🚩 Прапорці-моменти]:::sys
+
+  STATS --> AVG[avg + worstNeed]
+  AVG --> MOOD[😊 Настрій / 💬 бульбашка]:::out
+  STATS -->|"hunger=0 і sanity=0 (підліток+)"| DEATH[💀 Смерть]:::bad
+  DEATH -->|⚡ /revive| STATS
+
+  AGE([🎂 Вік у днях]):::sys --> STAGE[🧬 Стадія розвитку]:::out
+  STAGE -->|визначає| ACTIVE["Активні показники<br/>+ доступні кнопки"]
+  ACTIVE --> STATS
+  ACTIVE --> A1
+  STAGE --> SPEECH[🗣️ Стиль мовлення]
+
+  EGGWARM[🔥 Сер. тепло яйця]:::state -->|при вилупленні| TEMP[🧬 Вдача 5 град.]:::out
+  STAGE -->|"досяг 1 стадії = вилупився"| HATCH[🐣 Вилуплення]:::out
+  HATCH -->|"старт: РАНДОМ"| PERS["🎭 Характер<br/>персона = ваги 7 архетипів"]:::out
+  HATCH --> TEMP
+
+  A2[💬 Чат гравця]:::act
+  A1 -->|"ліплять характер<br/>(стадії 🫠 і 👾)"| PERS
+  A2 --> PERS
+  A3 --> PERS
+  STAGE -->|"стадія 😈: ЗАСТИГАЄ 🔒"| PERS
+
+  PERS -->|"домінанта або суміш X×Y"| LLM[🧠 Відповідь LLM]:::out
+  TEMP --> LLM
+  SPEECH --> LLM
+  DAY --> LLM
+  STATS --> LLM
+  A2 --> LLM
+
+  A1 --> STREAK[📅 Денний стрік]:::sys
+  A2 --> STREAK
+  A1 --> COUNT[🔢 Лічильники]:::sys
+  A2 --> COUNT
+  A3 --> COUNT
+
+  STATS --> ACH[🏆 Досягнення x23]:::out
+  STREAK --> ACH
+  COUNT --> ACH
+  FLAGS --> ACH
+  TEMP --> ACH
+  AGE --> ACH
+
+  CRON([⏰ Cron щогодини]):::sys --> NUDGE[🔔 Нагадування саме]:::out
+  STATS --> NUDGE
+  DAY -->|"ніч = тиша"| NUDGE
+</div>
+
+<h2>📊 Показники (стани) і занепад</h2>
+<div class="card">
+<table>
+  <tr><th>Показник</th><th>Занепад/год (день)</th><th>100%→0% удень</th><th>Уночі (×0.18)</th></tr>
+  <tr><td>🔥 Тепло</td><td>60</td><td>~1.7 год</td><td>~9 год</td></tr>
+  <tr><td>🍗 Ситість</td><td>66</td><td>~1.5 год</td><td>~8 год</td></tr>
+  <tr><td>🎉 Настрій</td><td>55</td><td>~1.8 год</td><td>~10 год</td></tr>
+  <tr><td>⚡ Енергія</td><td>50</td><td>~2.0 год</td><td>~11 год</td></tr>
+  <tr><td>🛁 Чистота</td><td>45</td><td>~2.2 год</td><td>~12 год</td></tr>
+  <tr><td>🫂 Спілкування</td><td>45</td><td>~2.2 год</td><td>~12 год</td></tr>
+  <tr><td>🤪 Психіка</td><td>40</td><td>~2.5 год</td><td>~14 год</td></tr>
+  <tr><td>🌌 Сенс буття</td><td>35</td><td>~2.9 год</td><td>~16 год</td></tr>
+</table>
+</div>
+<div class="legend">Світлофор у картці: 🟢 ≥60% · 🟡 30–59% · 🔴 &lt;30%. Уночі (22:00–08:00 за <code>TZ_OFFSET_HOURS</code>) занепад у 5.5 раза повільніший — щоб пережити сон.</div>
+
+<h2>🔘 Дії догляду (кнопки) → ефекти</h2>
+<div class="card">
+<table>
+  <tr><th>Кнопка</th><th>Відновлює</th><th>Ефекти</th></tr>
+  <tr><td>🔥 Гріти</td><td>Тепло</td><td><span class="pos">warmth +45</span>, <span class="pos">mood +5</span></td></tr>
+  <tr><td>🍗 Годувати</td><td>Ситість</td><td><span class="pos">hunger +40</span>, <span class="neg">hygiene −5</span>, <span class="pos">mood +3</span></td></tr>
+  <tr><td>🛁 Мити</td><td>Чистота</td><td><span class="pos">hygiene +50</span>, <span class="pos">mood +5</span></td></tr>
+  <tr><td>😴 Спати</td><td>Енергія</td><td><span class="pos">energy +50</span>, <span class="neg">hunger −5</span></td></tr>
+  <tr><td>🎮 Гратися</td><td>Настрій</td><td><span class="pos">mood +35</span>, <span class="neg">energy −15</span>, <span class="neg">hunger −10</span></td></tr>
+  <tr><td>🧘 Заспокоїти</td><td>Психіка</td><td><span class="pos">sanity +40</span>, <span class="pos">mood +10</span></td></tr>
+  <tr><td>🫂 Спілкуватись</td><td>Спілкування</td><td><span class="pos">social +40</span>, <span class="pos">mood +15</span>, <span class="neg">energy −5</span></td></tr>
+  <tr><td>🌌 Медитувати</td><td>Сенс буття</td><td><span class="pos">purpose +40</span>, <span class="pos">sanity +20</span>, <span class="neg">energy −10</span></td></tr>
+</table>
+</div>
+<div class="legend">Доступні лише ті кнопки, чий показник активний на поточній стадії (нижче).</div>
+
+<h2>🧬 Стадії розвитку → які показники й кнопки активні</h2>
+<div class="card">
+<table>
+  <tr><th>Вік</th><th>Стадія</th><th>Активні показники</th></tr>
+  <tr><td>0 дн</td><td>🥚 Яйце</td><td>🔥</td></tr>
+  <tr><td>1 дн</td><td>🫠 Слизька Грудка</td><td>🔥 🍗 🛁</td></tr>
+  <tr><td>3 дн</td><td>👾 Дивне Створіння</td><td>🍗 🛁 ⚡ 🎉</td></tr>
+  <tr><td>7 дн</td><td>😈 Хаотичний Монстр</td><td>🍗 🛁 ⚡ 🎉 <span class="sec-stat">🤪</span></td></tr>
+  <tr><td>14 дн</td><td>🐉 Стародавнє Зло</td><td>🍗 🛁 ⚡ 🎉 🤪 <span class="sec-stat">🫂</span></td></tr>
+  <tr><td>30 дн</td><td>🌌 Космічна Сутність</td><td>🍗 ⚡ 🎉 🤪 🫂 <span class="sec-stat">🌌</span> <span class="tag">без 🛁</span></td></tr>
+</table>
+</div>
+<div class="legend">На новій стадії показники «відкриваються», і з'являються відповідні кнопки. Перехід святкується окремим повідомленням.</div>
+
+<h2>🥚→🐣 Народження: як формуються вдача й характер</h2>
+<div class="grid">
+  <div class="card">
+    <h3>🧬 Вдача — від догляду за яйцем</h3>
+    <p class="legend">Рахується середнє <b>тепло</b> за весь час, поки істота — яйце. Фіксується назавжди при вилупленні.</p>
+    <table>
+      <tr><th>Сер. тепло</th><th>Вдача</th></tr>
+      <tr><td>≥ 85%</td><td>😇 Янгол</td></tr>
+      <tr><td>68–85%</td><td>🥰 Лагідне</td></tr>
+      <tr><td>50–68%</td><td>😌 Врівноважене</td></tr>
+      <tr><td>32–50%</td><td>😼 Норовливе</td></tr>
+      <tr><td>&lt; 32%</td><td>😈 Дике</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>🎭 Характер — рандом, потім ДРЕЙФ</h3>
+    <p class="legend">Старт випадковий. Перші 2 стадії (🫠 і 👾) <b>ліпиться доглядом</b> і може стати іншим або сумішшю двох (X × Y). На стадії 😈 <b>застигає 🔒</b>.</p>
+    <span class="pill">😈 Ґремлін</span><span class="pill">🌌 Філософ</span>
+    <span class="pill">🌞 Сонечко</span><span class="pill">🎬 Король драми</span>
+    <span class="pill">😴 Сонько</span><span class="pill">🤓 Ботанік</span>
+    <span class="pill">😎 Бунтар</span>
+    <table style="margin-top:10px">
+      <tr><th>Що робиш</th><th>Тягне до</th></tr>
+      <tr><td>🎮 Гратися</td><td>🌞 Сонечко + 😈 Ґремлін</td></tr>
+      <tr><td>🍗 Годувати</td><td>🌞 Сонечко</td></tr>
+      <tr><td>🛁 Мити</td><td>🤓 Ботанік</td></tr>
+      <tr><td>😴 Спати</td><td>😴 Сонько</td></tr>
+      <tr><td>🧘 Заспокоїти / 🌌 Медитувати</td><td>🌌 Філософ</td></tr>
+      <tr><td>🫂 Спілкуватись</td><td>🌞 Сонечко + 🎬 Драма</td></tr>
+      <tr><td>💬 Чат</td><td>🎬 Драма</td></tr>
+      <tr><td>🎲 Події</td><td>😈 Ґремлін</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>🧠 З чого збирається відповідь LLM</h2>
+<div class="card">
+  <p>Системний промпт = поєднання:</p>
+  <span class="pill">🎭 Характер (7)</span> +
+  <span class="pill">🧬 Вдача (5)</span> +
+  <span class="pill">🗣️ Стиль за стадією</span> +
+  <span class="pill">🌗 Пора доби</span> +
+  <span class="pill">📊 Поточний стан</span>
+  <p class="legend">🗣️ Стиль за стадією: яйце — лише звуки; немовля — агу/слова; дитина — цікава; підліток — зухвалий; дорослий — красномовний; космос — загадковий. Усе перемножується → кожен улюбленець звучить унікально.</p>
+</div>
+
+<h2>🎲 Події</h2>
+<div class="card">
+  <p><b>60 подій</b> — по <b>10 на кожну стадію</b>, з вибором із 2 варіантів. Ефекти діють лише на активні показники стадії. Результат і реальна зміна — у модальному вікні.</p>
+  <p class="legend">Кулдаун між подіями — <code>2 год</code>. Деякі вибори дають прапорці для досягнень (культ, тостер).</p>
+</div>
+
+<h2>🏆 Досягнення (23) — що чим відкривається</h2>
+<div class="card">
+<table>
+  <tr><th>Досягнення</th><th>Умова</th><th>Звідки дані</th></tr>
+  <tr><td>🐣 Перші кроки</td><td>дати ім'я</td><td>name</td></tr>
+  <tr><td>💯 На максимум</td><td>показник = 100%</td><td>🚩 flag maxed</td></tr>
+  <tr><td>🌟 Ідеальний догляд</td><td>усі активні ≥ 90%</td><td>📊 stats</td></tr>
+  <tr><td>🔥 Тиждень разом</td><td>вік ≥ 7 дн</td><td>🎂 age</td></tr>
+  <tr><td>🎂 Місяць разом</td><td>вік ≥ 30 дн</td><td>🎂 age</td></tr>
+  <tr><td>💖 Нерозлучні</td><td>100 взаємодій</td><td>🔢 interactions</td></tr>
+  <tr><td>📅 Три дні поспіль</td><td>стрік ≥ 3</td><td>📅 streak</td></tr>
+  <tr><td>🗓️ Тиждень дисципліни</td><td>стрік ≥ 7</td><td>📅 streak</td></tr>
+  <tr><td>🏅 Місяць відданості</td><td>стрік ≥ 30</td><td>📅 streak</td></tr>
+  <tr><td>🌙 Нічна сова</td><td>зайти вночі</td><td>🌗 dayPart</td></tr>
+  <tr><td>🌅 Рання пташка</td><td>зайти зранку</td><td>🌗 dayPart</td></tr>
+  <tr><td>🥀 На межі</td><td>показник = 0%</td><td>🚩 flag red</td></tr>
+  <tr><td>🧊 Дитя холоду</td><td>яйце замерзло</td><td>🚩 flag froze</td></tr>
+  <tr><td>⚰️ Втрата</td><td>«смерть»</td><td>🔢 deaths</td></tr>
+  <tr><td>👻 Блудний улюбленець</td><td>повернутись після 3+ дн</td><td>🚩 flag prodigal</td></tr>
+  <tr><td>🧦 Шкарпетковий культист</td><td>приєднатись до культу</td><td>🚩 подія e4_cult</td></tr>
+  <tr><td>🍞 Розбите серце</td><td>«тостер неживий»</td><td>🚩 подія e3_crush</td></tr>
+  <tr><td>🤡 Душа компанії</td><td>50 повідомлень</td><td>🔢 chat_count</td></tr>
+  <tr><td>🎲 Шукач пригод</td><td>10 подій</td><td>🔢 counts.event</td></tr>
+  <tr><td>😈 Народжений у холоді</td><td>вилупитись Диким</td><td>🧬 temperament</td></tr>
+  <tr><td>😇 Благословенне</td><td>вилупитись Янголом</td><td>🧬 temperament</td></tr>
+  <tr><td>🧘 Внутрішній спокій</td><td>10× заспокоїти/медитувати</td><td>🔢 counts</td></tr>
+  <tr><td>🏆 Майстер турботи</td><td>відкрити 15 досягнень</td><td>🏆 meta</td></tr>
+</table>
+</div>
+
+<h2>⚙️ Системи й таймери</h2>
+<div class="grid">
+  <div class="card">
+    <h3>📅 Денний стрік</h3>
+    <p class="legend">Рахує дні поспіль із активністю. +1 за новий день; скидання при пропуску; «повернення» при розриві ≥3 дн. Показується в картці як 🔥 N дн.</p>
+  </div>
+  <div class="card">
+    <h3>🌗 Пора доби (TZ +3)</h3>
+    <p class="legend">Впливає на: занепад (ніч ×0.18), тон LLM, бульбашку-реакцію, і вимикає нічні нагадування.</p>
+  </div>
+  <div class="card">
+    <h3>🔔 Нагадування (cron)</h3>
+    <p class="legend">Щогодини. Пише саме, якщо є гостра потреба або тиша ≥4 год. Кулдаун 2 год. Уночі мовчить. Яйце нагадує частіше (тиша 4 год, шанс 0.85).</p>
+  </div>
+  <div class="card">
+    <h3>💀 Смерть і воскресіння</h3>
+    <p class="legend">Лише з підліткової стадії (коли є 🤪). Настає, коли 🍗=0 і 🤪=0 одночасно (~2.5 год ігнору вдень). <code>/revive</code> повертає всі активні до 60%.</p>
+  </div>
+</div>
+
+<h2>🔢 Що відстежується на улюбленці</h2>
+<div class="card">
+  <span class="pill">показники ×8</span><span class="pill">вік / стадія</span><span class="pill">🧬 вдача</span>
+  <span class="pill">🎭 характер</span><span class="pill">📅 стрік + рекорд</span><span class="pill">interactions</span>
+  <span class="pill">chat_count</span><span class="pill">counts (дії/події)</span><span class="pill">deaths</span>
+  <span class="pill">🚩 flags (maxed/red/froze/cult/heartbreak/prodigal)</span><span class="pill">досягнення</span>
+  <span class="pill">last_seen / last_event / last_nudge</span><span class="pill">egg_warm_sum/egg_hours</span>
+</div>
+
+<div class="note">Усі числа (швидкості занепаду, ефекти дій, пороги стадій/вдачі, таймери) — прості константи у <code>pet.js</code> / <code>index.js</code>. Скажи, що змінити — підкрутимо за секунди.</div>
+
+</div>
+<script>
+  mermaid.initialize({startOnLoad:true, theme:'dark', flowchart:{curve:'basis'}});
+</script>
+</body>
+</html>
