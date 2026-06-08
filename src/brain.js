@@ -25,7 +25,7 @@ function config(env) {
 }
 
 function stateContext(pet) {
-  const lines = Object.keys(STAT_LABELS).map(
+  const lines = pet.activeStats().map(
     (s) => `${STAT_LABELS[s][0]}: ${Math.round(pet[s])}%`
   );
   const worst = pet.worstNeed();

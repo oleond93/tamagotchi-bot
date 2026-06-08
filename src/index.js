@@ -6,7 +6,7 @@
 import * as brain from "./brain.js";
 import * as db from "./db.js";
 import { PERSONALITIES } from "./personalities.js";
-import { Pet, now, dayPart } from "./pet.js";
+import { Pet, now, dayPart, ACTIONS } from "./pet.js";
 import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
 
@@ -74,27 +74,25 @@ function mainKeyboard(pet) {
   if (!pet.alive) {
     return { inline_keyboard: [[{ text: "⚡ Воскресити", callback_data: "revive" }]] };
   }
-  return {
-    inline_keyboard: [
-      [
-        { text: "🍗 Годувати", callback_data: "feed" },
-        { text: "🎮 Гратися", callback_data: "play" },
-      ],
-      [
-        { text: "😴 Спати", callback_data: "sleep" },
-        { text: "🛁 Мити", callback_data: "clean" },
-      ],
-      [
-        { text: "🎲 Подія", callback_data: "evt" },
-        { text: "🌱 Ріст", callback_data: "grow" },
-      ],
-      [
-        { text: "🏆 Досягнення", callback_data: "ach" },
-        { text: "🎭 Характер", callback_data: "pers" },
-      ],
-      [{ text: "🔄 Оновити", callback_data: "status" }],
-    ],
-  };
+  // Кнопки-дії генеруються під поточну стадію (по 2 у рядок).
+  const actionButtons = pet.stageActions().map((a) => ({
+    text: ACTIONS[a].label,
+    callback_data: a,
+  }));
+  const rows = [];
+  for (let i = 0; i < actionButtons.length; i += 2) {
+    rows.push(actionButtons.slice(i, i + 2));
+  }
+  rows.push([
+    { text: "🎲 Подія", callback_data: "evt" },
+    { text: "🌱 Ріст", callback_data: "grow" },
+  ]);
+  rows.push([
+    { text: "🏆 Досягнення", callback_data: "ach" },
+    { text: "🎭 Характер", callback_data: "pers" },
+  ]);
+  rows.push([{ text: "🔄 Оновити", callback_data: "status" }]);
+  return { inline_keyboard: rows };
 }
 
 function backKeyboard() {
@@ -117,14 +115,6 @@ function eventKeyboard(ev) {
   };
 }
 
-// Маленькі «тости» при натисканні кнопок.
-const ACTION_TOAST = {
-  feed: "🍗 Ням-ням!",
-  play: "🎮 Віііі!",
-  sleep: "😴 Хр-р-р...",
-  clean: "🛁 Чистенький!",
-};
-
 // --- Стан із застосуванням занепаду ------------------------------------------
 async function getPet(env, chatId) {
   const pet = await db.load(env, chatId);
@@ -139,23 +129,14 @@ async function getPet(env, chatId) {
 // --- Тексти ------------------------------------------------------------------
 const HELP =
   "🐣 <b>Я твій тамагочі.</b> Доглядай за мною, бо мені стає сумно з часом.\n\n" +
-  "🍗 /feed — погодувати\n" +
-  "🎮 /play — пограти\n" +
-  "😴 /sleep — вкласти спати\n" +
-  "🛁 /clean — помити\n" +
-  "📊 /status — мій стан\n" +
-  "✏️ /name &lt;ім'я&gt; — перейменувати\n" +
-  "🎭 /personality — змінити характер\n" +
-  "💀 /revive — воскресити\n\n" +
-  "💡 Найзручніше — кнопками під карткою стану (/status).\n" +
+  "🧬 Мої потреби й дії <b>змінюються з ростом</b>: яйце треба лише гріти 🔥, " +
+  "а дорослий уже хоче їсти, гратися, спілкуватися тощо.\n\n" +
+  "📊 /status — моя картка з кнопками догляду\n" +
+  "🌱 кнопка «Ріст» — що відкриється далі\n" +
+  "🏆 кнопка «Досягнення» · 🎲 «Подія»\n" +
+  "✏️ /name &lt;ім'я&gt; · 🎭 /personality · 💀 /revive\n\n" +
+  "💡 Найзручніше — кнопками під карткою (/status). " +
   "А ще просто пиши мені, я люблю балакати 💬";
-
-const ACTION_FLAVOUR = {
-  feed: "🍗 <i>ням-ням</i>... дякую, я вже не з'їм твій роутер сьогодні",
-  play: "🎮 ВІІІ! найкращий день мого життя (поки що)",
-  sleep: "😴 *хропе абсурдно гучно для свого розміру*",
-  clean: "🛁 блищу як нова копійка ✨",
-};
 
 // --- Обробка одного оновлення від Телеграму ----------------------------------
 async function handleUpdate(env, update) {
@@ -237,20 +218,23 @@ async function handleUpdate(env, update) {
     return void (await send(env, chatId, "⚡ <b>ВОНО ЖИВЕ!</b> Дякую 🫠"));
   }
 
-  // Дії догляду
-  const action = { "/feed": "feed", "/play": "play", "/sleep": "sleep", "/clean": "clean" }[cmd];
+  // Дії догляду (слеш-команда = ключ дії без "/")
+  const action = cmd.startsWith("/") && ACTIONS[cmd.slice(1)] ? cmd.slice(1) : null;
   if (action) {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
     if (!pet.alive)
       return void (await send(env, chatId, "☠️ Я тимчасово мертвий. Спробуй /revive"));
+    if (!pet.stageActions().includes(action)) {
+      return void (await send(env, chatId, "🤔 Зараз ця дія мені ще недоступна — підрости 🌱"));
+    }
     pet.doAction(action);
     const dp = dpart(env);
     await db.save(env, chatId, pet);
     await send(
       env,
       chatId,
-      `${ACTION_FLAVOUR[action]}\n\n${pet.statusCard({ dayPart: dp })}`,
+      `${ACTIONS[action].toast}\n\n${pet.statusCard({ dayPart: dp })}`,
       mainKeyboard(pet)
     );
     await announceAchievements(env, chatId, pet, { dayPart: dp });
@@ -383,12 +367,14 @@ async function handleCallback(env, cq) {
   }
 
   let toast = "";
-  if (["feed", "play", "sleep", "clean"].includes(data)) {
+  if (ACTIONS[data]) {
     if (!pet.alive) {
       await answerCb(env, cq.id, "Я мертвий 💀 спершу воскреси");
+    } else if (!pet.stageActions().includes(data)) {
+      await answerCb(env, cq.id, "Ще не доступно 🌱");
     } else {
       pet.doAction(data);
-      toast = ACTION_TOAST[data] || "";
+      toast = ACTIONS[data].toast || "";
     }
   }
   // data === "status" — просто оновлюємо картку.
