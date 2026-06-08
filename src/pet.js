@@ -107,6 +107,30 @@ export function now() {
   return Date.now() / 1000;
 }
 
+// Часовий пояс для «нічного» сповільнення (встановлює index.js з env).
+let TZ_OFFSET = 3;
+export function setTzOffset(h) {
+  TZ_OFFSET = Number(h) || 0;
+}
+
+// Уночі (22:00–08:00 за локальним часом) занепад сповільнюється у 5 разів,
+// щоб за ~8 год сну показники падали майже до мінімуму, але не до нуля.
+const NIGHT_START = 22;
+const NIGHT_END = 8;
+const NIGHT_FACTOR = 0.18;
+
+// Скільки з проміжку [t0, t1] (сек) припало на «ніч» — для коректного
+// сповільнення занепаду за час сну (проміжок може охоплювати ніч і ранок).
+function nightHoursIn(t0, t1) {
+  let nh = 0;
+  const step = 0.1; // крок 6 хв
+  for (let h = 0; (t0 + h * 3600) < t1; h += step) {
+    const localH = (((t0 + h * 3600) / 3600 + TZ_OFFSET) % 24 + 24) % 24;
+    if (localH >= NIGHT_START || localH < NIGHT_END) nh += step;
+  }
+  return nh;
+}
+
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
 // Візуальний роздільник між блоками картки.
@@ -264,13 +288,19 @@ export class Pet {
 
   applyDecay() {
     if (!this.alive) return;
-    const elapsedH = (now() - this.last_update) / 3600;
+    let elapsedH = (now() - this.last_update) / 3600;
     if (elapsedH > 0) {
+      elapsedH = Math.min(elapsedH, 72); // понад це все одно вже на нулі
       const wasEgg = this.isEgg();
       const beforeWarmth = this.warmth;
+      // Ефективні «години занепаду»: нічні години рахуються повільніше.
+      const t0 = now() - elapsedH * 3600;
+      const nightH = Math.min(elapsedH, nightHoursIn(t0, now()));
+      const dayH = elapsedH - nightH;
+      const effH = dayH + NIGHT_FACTOR * nightH;
       // Занепадають лише активні на цій стадії характеристики.
       for (const stat of this.activeStats()) {
-        this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * elapsedH);
+        this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * effH);
       }
       // Поки яйце — накопичуємо середньозважене тепло (для майбутньої вдачі).
       if (wasEgg) {

@@ -6,7 +6,7 @@
 import * as brain from "./brain.js";
 import * as db from "./db.js";
 import { PERSONALITIES } from "./personalities.js";
-import { Pet, now, dayPart, ACTIONS, STAT_META } from "./pet.js";
+import { Pet, now, dayPart, ACTIONS, STAT_META, setTzOffset } from "./pet.js";
 import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
 import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
@@ -508,6 +508,7 @@ async function setupWebhook(env, origin) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    setTzOffset(env.TZ_OFFSET_HOURS ?? 3);
     if (env.DB) await ensureSchema(env);
 
     // Обробка оновлення від Телеграму (шлях містить токен — це й є секрет).
@@ -555,6 +556,7 @@ export default {
 
   // Cron: раз на годину — занепад + проактивні нагадування.
   async scheduled(event, env, ctx) {
+    setTzOffset(env.TZ_OFFSET_HOURS ?? 3);
     ctx.waitUntil(tick(env));
   },
 };
