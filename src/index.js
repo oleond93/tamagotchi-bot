@@ -6,7 +6,7 @@
 import * as brain from "./brain.js";
 import * as db from "./db.js";
 import { PERSONALITIES } from "./personalities.js";
-import { Pet, now, dayPart, ACTIONS } from "./pet.js";
+import { Pet, now, dayPart, ACTIONS, STAT_META } from "./pet.js";
 import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
 import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
@@ -419,19 +419,30 @@ async function handleCallback(env, cq) {
     const [, evId, idxStr] = data.split(":");
     const ev = findEvent(evId);
     const opt = ev?.options[Number(idxStr)];
+    let alertText = "...";
     if (opt) {
+      // Знімок до — щоб показати РЕАЛЬНУ зміну (з урахуванням меж 0..100).
+      const before = {};
+      for (const s of Object.keys(opt.effects)) before[s] = pet[s];
       pet.applyEffects(opt.effects);
       pet.counts.event = (pet.counts.event || 0) + 1;
+
+      const parts = [];
+      for (const s of Object.keys(opt.effects)) {
+        const d = Math.round(pet[s] - before[s]);
+        if (d !== 0) {
+          const [label, em] = STAT_META[s];
+          parts.push(`${em} ${label} ${d > 0 ? "+" : ""}${d}`);
+        }
+      }
+      const effLine = parts.length ? `\n\n📊 ${parts.join(" · ")}` : "";
+      alertText = `${opt.result}${effLine}`;
     }
     await db.save(env, chatId, pet);
-    await answerCb(env, cq.id, "🎲");
-    await editCard(
-      env,
-      chatId,
-      messageId,
-      `${opt ? opt.result : "..."}\n\n${pet.statusCard(ctx)}`,
-      mainKeyboard(pet)
-    );
+    // Результат і ефект — у модальному вікні (помітно й однозначно).
+    await answerCb(env, cq.id, alertText, true);
+    // Картка позаду тихо оновлюється до нового стану.
+    await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
     await announceAchievements(env, chatId, pet, ctx);
     await db.save(env, chatId, pet);
     return;
