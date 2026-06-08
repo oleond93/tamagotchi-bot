@@ -17,10 +17,10 @@ function pick(arr) {
 function config(env) {
   const baseUrl = env.LLM_BASE_URL || "https://openrouter.ai/api/v1";
   const apiKey = env.LLM_API_KEY || env.OPENROUTER_API_KEY;
+  // "openrouter/free" — роутер, який сам обирає доступну безкоштовну модель.
+  // Надійніше за конкретну назву, бо список free-моделей змінюється.
   const model =
-    env.LLM_MODEL ||
-    env.OPENROUTER_MODEL ||
-    "meta-llama/llama-3.3-70b-instruct:free";
+    env.LLM_MODEL || env.OPENROUTER_MODEL || "openrouter/free";
   return { baseUrl, apiKey, model };
 }
 
@@ -67,6 +67,44 @@ async function chat(env, system, user, { maxTokens = 200, temperature = 1.0 } = 
   if (!resp.ok) return null;
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content?.trim() || null;
+}
+
+// Діагностика: показує, чи є ключ, яку модель використано, і РЕАЛЬНУ
+// відповідь провайдера. Ключ не розкривається. Доступно через /diag.
+export async function diag(env) {
+  const { baseUrl, apiKey, model } = config(env);
+  const out = {
+    has_telegram_token: !!env.TELEGRAM_TOKEN,
+    has_ai_key: !!apiKey,
+    base_url: baseUrl,
+    model,
+  };
+  if (!apiKey) {
+    out.problem =
+      "Немає AI-ключа. Додай секрет OPENROUTER_API_KEY (або LLM_API_KEY).";
+    return out;
+  }
+  try {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 20,
+      }),
+    });
+    out.http_status = resp.status;
+    out.ok = resp.ok;
+    const body = await resp.text();
+    out.provider_response = body.slice(0, 600);
+  } catch (e) {
+    out.fetch_error = String(e);
+  }
+  return out;
 }
 
 export async function reply(env, pet, userText) {

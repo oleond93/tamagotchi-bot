@@ -207,6 +207,14 @@ export default {
       return new Response("ok");
     }
 
+    // Діагностика AI-провайдера: відкрий /diag у браузері, щоб побачити причину.
+    if (url.pathname === "/diag") {
+      const info = await brain.diag(env);
+      return new Response(JSON.stringify(info, null, 2), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    }
+
     // Одноразове налаштування вебхука.
     if (url.pathname === "/init") {
       if (!env.TELEGRAM_TOKEN) {
