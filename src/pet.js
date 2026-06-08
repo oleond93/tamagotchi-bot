@@ -1,6 +1,8 @@
 // pet.js — вся логіка тамагочі: стан, занепад (decay), дії, еволюція.
 // Чиста логіка, без залежностей від Телеграму чи LLM.
 
+import { eggMystery } from "./egg.js";
+
 // Повний каталог характеристик (усі можливі). Кожна: [назва, емодзі].
 export const STAT_META = {
   warmth: ["Тепло", "🔥"],
@@ -95,6 +97,19 @@ export class Pet {
     this.purpose = d.purpose ?? 70;
     this.counts = d.counts ?? {}; // лічильники дій: feed/play/sleep/clean/revive/event
     this.achievements = d.achievements ?? []; // id здобутих досягнень
+  }
+
+  isEgg() {
+    return this.evolutionInfo().index === 0;
+  }
+
+  // Знак вилуплення залежно від прогресу (0..1) — змінюється протягом доби.
+  eggSign() {
+    const p = this.evolutionInfo().progress;
+    if (p < 0.33) return "🥚 Тихо. Лише рівне тепло...";
+    if (p < 0.66) return "👂 Зсередини — ледь чутне булькотіння.";
+    if (p < 0.9) return "💢 З'явилась перша тріщинка!";
+    return "💥 Воно ось-ось вилупиться!!!";
   }
 
   // Характеристики, активні на поточній стадії розвитку.
@@ -308,6 +323,21 @@ export class Pet {
       const n = Math.max(0, Math.min(10, Math.round(v / 10)));
       return "▰".repeat(n) + "▱".repeat(10 - n);
     };
+
+    // Особлива картка ЯЙЦЯ — з акцентом на вилупленні.
+    if (this.isEgg()) {
+      const e = this.evolutionInfo();
+      const hatch = bar(e.progress * 100);
+      const warm = Math.round(this.warmth);
+      return (
+        `${emoji} <b>${this.name}</b> · <i>Яйце</i>\n` +
+        `🔮 Передчуття: воно буде <b>${eggMystery(this.name)}</b>\n\n` +
+        `${this.eggSign()}\n\n` +
+        `🐣 <b>Вилуплення</b>\n<code>${hatch}</code> ${Math.round(e.progress * 100)}% · ще ${this._humanLeft(e.daysLeft)}\n\n` +
+        `🔥 Тепло ${dot(warm)} <code>${bar(warm)}</code> <b>${warm}%</b>\n` +
+        `<i>Гарно грій — і воно вилупиться щасливим 🥰</i>`
+      );
+    }
     const rows = this.activeStats().map((s) => {
       const [label, em] = STAT_META[s];
       const v = Math.round(this[s]);

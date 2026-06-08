@@ -9,6 +9,7 @@ import { PERSONALITIES } from "./personalities.js";
 import { Pet, now, dayPart, ACTIONS } from "./pet.js";
 import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
+import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
 
 // Пора доби з урахуванням TZ (типово Київ, +3). Кожен deployer може змінити
 // змінною TZ_OFFSET_HOURS у дашборді.
@@ -75,10 +76,17 @@ function mainKeyboard(pet) {
     return { inline_keyboard: [[{ text: "⚡ Воскресити", callback_data: "revive" }]] };
   }
   // Кнопки-дії генеруються під поточну стадію (по 2 у рядок).
-  const actionButtons = pet.stageActions().map((a) => ({
-    text: ACTIONS[a].label,
-    callback_data: a,
-  }));
+  // У яйця — додаткові дрібні взаємодії для залученості.
+  const actionButtons = pet.isEgg()
+    ? [
+        { text: "🔥 Гріти", callback_data: "warm" },
+        { text: "👂 Послухати", callback_data: "listen" },
+        { text: "🤲 Поколихати", callback_data: "wiggle" },
+      ]
+    : pet.stageActions().map((a) => ({
+        text: ACTIONS[a].label,
+        callback_data: a,
+      }));
   const rows = [];
   for (let i = 0; i < actionButtons.length; i += 2) {
     rows.push(actionButtons.slice(i, i + 2));
@@ -309,6 +317,16 @@ async function handleCallback(env, cq) {
     return;
   }
 
+  // Егг-взаємодії: послухати / поколихати — варіативні смішні реакції.
+  if (data === "listen" || data === "wiggle") {
+    const line = data === "listen" ? randomLine(EGG_LISTEN) : randomLine(EGG_WIGGLE);
+    if (data === "wiggle") pet.warmth = Math.min(100, pet.warmth + 3); // дрібний відгук
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, data === "listen" ? "👂" : "🤲");
+    await editCard(env, chatId, messageId, `${line}\n\n${pet.statusCard(ctx)}`, mainKeyboard(pet));
+    return;
+  }
+
   // Випадкова міні-подія.
   if (data === "evt") {
     await answerCb(env, cq.id, "🎲");
@@ -472,13 +490,16 @@ async function tick(env) {
     if (!pet.alive) continue;
     if (now() - pet.last_nudge < NUDGE_COOLDOWN_H * 3600) continue;
 
+    // Яйце нагадує про себе частіше — щоб людина повернулась за добу очікування.
+    const silenceH = pet.isEgg() ? 4 : SILENT_HOURS_H;
+    const chance = pet.isEgg() ? 0.85 : NUDGE_CHANCE;
     const needsAttention = pet.worstNeed() !== null;
-    const longSilence = now() - pet.last_seen > SILENT_HOURS_H * 3600;
+    const longSilence = now() - pet.last_seen > silenceH * 3600;
     if (!(needsAttention || longSilence)) continue;
-    if (Math.random() > NUDGE_CHANCE) continue;
+    if (Math.random() > chance) continue;
 
     try {
-      const txt = await brain.nudge(env, pet, dp);
+      const txt = pet.isEgg() ? randomLine(EGG_TEASERS) : await brain.nudge(env, pet, dp);
       await send(env, chatId, txt);
       pet.last_nudge = now();
       await db.save(env, chatId, pet);
