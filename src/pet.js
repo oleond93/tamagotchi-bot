@@ -140,6 +140,14 @@ export class Pet {
     this.egg_hours = d.egg_hours ?? 0; //       Σ години у стадії яйця
     this.temperament = d.temperament ?? null; // фіксується при вилупленні
     this.last_event = d.last_event ?? 0; //     час останньої події (кулдаун)
+    // Лічильники та прапорці для досягнень.
+    this.interactions = d.interactions ?? 0; //   усього дій користувача
+    this.chat_count = d.chat_count ?? 0; //       повідомлень у вільному чаті
+    this.deaths = d.deaths ?? 0; //               скільки разів «помирав»
+    this.streak = d.streak ?? 0; //               днів поспіль
+    this.best_streak = d.best_streak ?? 0;
+    this.last_active_day = d.last_active_day ?? 0; // день останньої активності
+    this.flags = d.flags ?? {}; //                разові «моменти»: maxed/red/froze/cult/...
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -268,10 +276,18 @@ export class Pet {
         this.egg_hours += elapsedH;
       }
       this.last_update = now();
-      // "Смерть" можлива лише коли психіка вже є (стадія підлітка+) і все на нулі.
+      // Прапорці-моменти для досягнень: «червона зона» і «яйце замерзло».
       const act = this.activeStats();
+      for (const stat of act) {
+        if (this[stat] <= 0) {
+          this.flags.red = true;
+          if (stat === "warmth" && wasEgg) this.flags.froze = true;
+        }
+      }
+      // "Смерть" можлива лише коли психіка вже є (стадія підлітка+) і все на нулі.
       if (act.includes("sanity") && this.hunger <= 0 && this.sanity <= 0) {
         this.alive = false;
+        this.deaths += 1;
       }
     }
     // Якщо щойно вилупилось — закріпити вдачу й характер.
@@ -285,6 +301,8 @@ export class Pet {
       this[stat] = clamp(this[stat] + delta);
     }
     this.counts[action] = (this.counts[action] || 0) + 1;
+    this.interactions += 1;
+    if (STATS.some((s) => this[s] >= 100)) this.flags.maxed = true;
   }
 
   // Застосувати ефекти міні-події (довільний об'єкт stat:delta).
@@ -293,6 +311,8 @@ export class Pet {
     for (const [stat, delta] of Object.entries(effects || {})) {
       if (STATS.includes(stat)) this[stat] = clamp(this[stat] + delta);
     }
+    this.interactions += 1;
+    if (STATS.some((s) => this[s] >= 100)) this.flags.maxed = true;
   }
 
   revive() {
@@ -445,6 +465,7 @@ export class Pet {
       const n = Math.max(0, Math.min(10, Math.round(v / 10)));
       return "▰".repeat(n) + "▱".repeat(10 - n);
     };
+    const streakLine = this.streak >= 2 ? `\n🔥 ${this.streak} дн. поспіль` : "";
 
     // Особлива картка ЯЙЦЯ — з акцентом на вилупленні.
     if (this.isEgg()) {
@@ -452,7 +473,7 @@ export class Pet {
       const hatch = bar(e.progress * 100);
       const warm = Math.round(this.warmth);
       return (
-        `${emoji} <b>${this.name}</b> · <i>Яйце</i>\n` +
+        `${emoji} <b>${this.name}</b> · <i>Яйце</i>${streakLine}\n` +
         `🔮 Передчуття: воно буде <b>${eggMystery(this.name)}</b>` +
         DIV +
         `${this.eggSign()}` +
@@ -475,7 +496,7 @@ export class Pet {
     const idLine = idParts.length ? `\n${idParts.join("  ·  ")}` : "";
     const header =
       `${emoji} <b>${this.name}</b> · <i>${name}</i>${idLine}\n` +
-      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}\n` +
+      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}${streakLine}\n` +
       `${this.reactionBubble(ctx)}`;
     if (!this.alive) {
       return header + DIV + rows.join("\n") +
@@ -509,6 +530,13 @@ export class Pet {
       egg_hours: this.egg_hours,
       temperament: this.temperament,
       last_event: this.last_event,
+      interactions: this.interactions,
+      chat_count: this.chat_count,
+      deaths: this.deaths,
+      streak: this.streak,
+      best_streak: this.best_streak,
+      last_active_day: this.last_active_day,
+      flags: this.flags,
     };
   }
 }

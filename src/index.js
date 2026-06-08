@@ -21,6 +21,25 @@ function dpart(env) {
 // Кулдаун між подіями (год). Після події кнопка «Подія» тимчасово «відпочиває».
 const EVENT_COOLDOWN_H = 2;
 
+// Оновлює денний стрік і ловить «повернення» після тривалої відсутності.
+// Викликати на кожну активність користувача (не з cron!).
+function registerActivity(pet, env) {
+  const tz = Number(env.TZ_OFFSET_HOURS ?? 3);
+  const today = Math.floor((Date.now() / 1000 + tz * 3600) / 86400);
+  if (!pet.last_active_day) {
+    pet.streak = 1;
+  } else if (today === pet.last_active_day) {
+    // та сама доба — нічого не міняємо
+  } else if (today === pet.last_active_day + 1) {
+    pet.streak = (pet.streak || 0) + 1;
+  } else {
+    if (today - pet.last_active_day >= 3) pet.flags.prodigal = true;
+    pet.streak = 1;
+  }
+  pet.last_active_day = today;
+  pet.best_streak = Math.max(pet.best_streak || 0, pet.streak || 0);
+}
+
 // Сповіщає про перехід на нову стадію (включно з вилупленням). Безпечно
 // викликати скрізь — святкує лише те, про що ще не сповіщали.
 async function celebrateEvolutions(env, chatId, pet) {
@@ -158,6 +177,7 @@ async function getPet(env, chatId) {
   if (pet) {
     pet.applyDecay();
     pet.last_seen = now();
+    registerActivity(pet, env);
     await db.save(env, chatId, pet);
     await celebrateEvolutions(env, chatId, pet);
   }
@@ -203,6 +223,7 @@ async function handleUpdate(env, update) {
     } else {
       pet.applyDecay();
       pet.last_seen = now();
+      registerActivity(pet, env);
       await db.save(env, chatId, pet);
       await celebrateEvolutions(env, chatId, pet);
       await send(env, chatId, pet.statusCard({ dayPart: dpart(env) }), mainKeyboard(pet));
@@ -312,6 +333,9 @@ async function handleUpdate(env, update) {
   const dp = dpart(env);
   pet.applyDecay();
   pet.last_seen = now();
+  pet.interactions += 1;
+  pet.chat_count += 1;
+  registerActivity(pet, env);
   await db.save(env, chatId, pet);
   await celebrateEvolutions(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
@@ -337,6 +361,7 @@ async function handleCallback(env, cq) {
   const ctx = { dayPart: dp };
   pet.applyDecay();
   pet.last_seen = now();
+  registerActivity(pet, env);
   await celebrateEvolutions(env, chatId, pet);
 
   // Гайд / лор (гортається сторінками).
@@ -370,6 +395,7 @@ async function handleCallback(env, cq) {
   if (data === "listen" || data === "wiggle") {
     const line = data === "listen" ? randomLine(EGG_LISTEN) : randomLine(EGG_WIGGLE);
     if (data === "wiggle") pet.warmth = Math.min(100, pet.warmth + 3); // дрібний відгук
+    pet.interactions += 1;
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, data === "listen" ? "👂" : "🤲");
     await editCard(env, chatId, messageId, `${line}\n\n${pet.statusCard(ctx)}`, mainKeyboard(pet));
@@ -408,6 +434,9 @@ async function handleCallback(env, cq) {
       for (const s of Object.keys(opt.effects)) before[s] = pet[s];
       pet.applyEffects(opt.effects);
       pet.counts.event = (pet.counts.event || 0) + 1;
+      // Прапорці для смішних досягнень.
+      if (evId === "e4_cult" && Number(idxStr) === 0) pet.flags.cult = true;
+      if (evId === "e3_crush" && Number(idxStr) === 1) pet.flags.heartbreak = true;
 
       const parts = [];
       for (const s of Object.keys(opt.effects)) {
