@@ -10,6 +10,7 @@ import { Pet, now, dayPart, ACTIONS } from "./pet.js";
 import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
 import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
+import { GUIDE_PAGES } from "./guide.js";
 
 // Пора доби з урахуванням TZ (типово Київ, +3). Кожен deployer може змінити
 // змінною TZ_OFFSET_HOURS у дашборді.
@@ -113,8 +114,27 @@ function mainKeyboard(pet) {
     { text: "🏆 Досягнення", callback_data: "ach" },
     { text: "🎭 Характер", callback_data: "pers" },
   ]);
-  rows.push([{ text: "🔄 Оновити", callback_data: "status" }]);
+  rows.push([
+    { text: "📖 Гайд", callback_data: "guide" },
+    { text: "🔄 Оновити", callback_data: "status" },
+  ]);
   return { inline_keyboard: rows };
+}
+
+function guideKeyboard(page) {
+  const last = GUIDE_PAGES.length - 1;
+  const nav = [];
+  if (page > 0) nav.push({ text: "◀ Назад", callback_data: `guide:${page - 1}` });
+  if (page < last) nav.push({ text: "Далі ▶", callback_data: `guide:${page + 1}` });
+  const rows = [];
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "✖️ Закрити", callback_data: "status" }]);
+  return { inline_keyboard: rows };
+}
+
+function guideText(page) {
+  const g = GUIDE_PAGES[page];
+  return `${g.title}  <i>(${page + 1}/${GUIDE_PAGES.length})</i>\n\n${g.body}`;
 }
 
 function backKeyboard() {
@@ -155,6 +175,7 @@ const HELP =
   "🧬 Мої потреби й дії <b>змінюються з ростом</b>: яйце треба лише гріти 🔥, " +
   "а дорослий уже хоче їсти, гратися, спілкуватися тощо.\n\n" +
   "📊 /status — моя картка з кнопками догляду\n" +
+  "📖 /guide — лор і як усе працює (раджу почати з нього!)\n" +
   "🌱 кнопка «Ріст» — що відкриється далі\n" +
   "🏆 кнопка «Досягнення» · 🎲 «Подія»\n" +
   "✏️ /name &lt;ім'я&gt; · 🎭 /personality · 💀 /revive\n\n" +
@@ -194,6 +215,10 @@ async function handleUpdate(env, update) {
   }
 
   if (cmd === "/help") return void (await send(env, chatId, HELP));
+
+  if (cmd === "/guide") {
+    return void (await send(env, chatId, guideText(0), guideKeyboard(0)));
+  }
 
   if (cmd === "/status") {
     const pet = await getPet(env, chatId);
@@ -279,7 +304,8 @@ async function handleUpdate(env, update) {
       env,
       chatId,
       `🎉 <b>${pet.name}</b> — ідеальне ім'я!\n\n` +
-        "Тепер я твоя відповідальність 😈 Користуйся кнопками нижче, або просто пиши мені 💬"
+        "Тепер я твоя відповідальність 😈 Користуйся кнопками нижче, або просто пиши мені 💬\n\n" +
+        "📖 <b>Новачок?</b> Тисни «Гайд» під карткою — там усе про те, що тут відбувається."
     );
     await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
     await announceAchievements(env, chatId, pet, { dayPart: dp });
@@ -318,6 +344,17 @@ async function handleCallback(env, cq) {
   pet.applyDecay();
   pet.last_seen = now();
   await celebrateEvolutions(env, chatId, pet);
+
+  // Гайд / лор (гортається сторінками).
+  if (data === "guide" || data.startsWith("guide:")) {
+    const page = data.includes(":")
+      ? Math.max(0, Math.min(GUIDE_PAGES.length - 1, Number(data.split(":")[1]) || 0))
+      : 0;
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "");
+    await editCard(env, chatId, messageId, guideText(page), guideKeyboard(page));
+    return;
+  }
 
   // Мапа розвитку.
   if (data === "grow") {
