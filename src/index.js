@@ -35,13 +35,15 @@ async function celebrateEvolutions(env, chatId, pet) {
   return celebrated;
 }
 
-// Перевіряє нові досягнення й надсилає привітання за кожне.
-async function announceAchievements(env, chatId, pet, ctx) {
+// Позначає нові досягнення (мутує pet) і повертає короткий текст-нотатку, або "".
+// Викликач сам зберігає pet і вирішує, де показати: у модалці чи дописати до повідомлення.
+function achievementNote(pet, ctx) {
   const fresh = checkNew(pet, ctx);
-  for (const a of fresh) {
-    await send(env, chatId, `🏆 <b>Нове досягнення!</b>\n${a.emoji} <b>${a.title}</b>\n<i>${a.desc}</i>`);
+  if (!fresh.length) return "";
+  if (fresh.length === 1) {
+    return `🏆 Нове досягнення: ${fresh[0].emoji} ${fresh[0].title}!`;
   }
-  return fresh.length > 0;
+  return "🏆 Нові досягнення:\n" + fresh.map((a) => `${a.emoji} ${a.title}`).join("\n");
 }
 
 // Створює таблицю, якщо її ще немає (щоб творцю не запускати міграції вручну).
@@ -218,9 +220,10 @@ async function handleUpdate(env, update) {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
     const dp = dpart(env);
-    await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
-    await announceAchievements(env, chatId, pet, { dayPart: dp });
+    const note = achievementNote(pet, { dayPart: dp });
     await db.save(env, chatId, pet);
+    const card = pet.statusCard({ dayPart: dp }) + (note ? `\n\n${note}` : "");
+    await send(env, chatId, card, mainKeyboard(pet));
     return;
   }
 
@@ -273,15 +276,12 @@ async function handleUpdate(env, update) {
     }
     pet.doAction(action);
     const dp = dpart(env);
+    const note = achievementNote(pet, { dayPart: dp });
     await db.save(env, chatId, pet);
-    await send(
-      env,
-      chatId,
-      `${ACTIONS[action].toast}\n\n${pet.statusCard({ dayPart: dp })}`,
-      mainKeyboard(pet)
-    );
-    await announceAchievements(env, chatId, pet, { dayPart: dp });
-    await db.save(env, chatId, pet);
+    const body =
+      `${ACTIONS[action].toast}\n\n${pet.statusCard({ dayPart: dp })}` +
+      (note ? `\n\n${note}` : "");
+    await send(env, chatId, body, mainKeyboard(pet));
     return;
   }
 
@@ -293,17 +293,17 @@ async function handleUpdate(env, update) {
     pet.awaiting_name = false;
     pet.name = text.slice(0, 30);
     const dp = dpart(env);
+    const note = achievementNote(pet, { dayPart: dp });
     await db.save(env, chatId, pet);
     await send(
       env,
       chatId,
       `🎉 <b>${pet.name}</b> — ідеальне ім'я!\n\n` +
         "Тепер я твоя відповідальність 😈 Користуйся кнопками нижче, або просто пиши мені 💬\n\n" +
-        "📖 <b>Новачок?</b> Тисни «Гайд» під карткою — там усе про те, що тут відбувається."
+        "📖 <b>Новачок?</b> Тисни «Гайд» під карткою — там усе про те, що тут відбувається." +
+        (note ? `\n\n${note}` : "")
     );
     await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
-    await announceAchievements(env, chatId, pet, { dayPart: dp });
-    await db.save(env, chatId, pet);
     return;
   }
 
@@ -316,8 +316,8 @@ async function handleUpdate(env, update) {
   await celebrateEvolutions(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
   const answer = await brain.reply(env, pet, text, dp);
-  await send(env, chatId, answer);
-  await announceAchievements(env, chatId, pet, { dayPart: dp });
+  const note = achievementNote(pet, { dayPart: dp });
+  await send(env, chatId, answer + (note ? `\n\n${note}` : ""));
   await db.save(env, chatId, pet);
 }
 
@@ -420,23 +420,22 @@ async function handleCallback(env, cq) {
       const effLine = parts.length ? `\n\n📊 ${parts.join(" · ")}` : "";
       alertText = `${opt.result}${effLine}`;
     }
+    const note = achievementNote(pet, ctx); // нове досягнення — у ту ж модалку
+    if (note) alertText += `\n\n${note}`;
     await db.save(env, chatId, pet);
-    // Результат і ефект — у модальному вікні (помітно й однозначно).
+    // Результат, ефект і досягнення — у модальному вікні (помітно й однозначно).
     await answerCb(env, cq.id, alertText, true);
     // Картка позаду тихо оновлюється до нового стану.
     await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
-    await announceAchievements(env, chatId, pet, ctx);
-    await db.save(env, chatId, pet);
     return;
   }
 
   if (data === "revive") {
     pet.revive();
+    const note = achievementNote(pet, ctx);
     await db.save(env, chatId, pet);
-    await answerCb(env, cq.id, "⚡ Воскрес!");
+    await answerCb(env, cq.id, note ? `⚡ Воскрес!\n\n${note}` : "⚡ Воскрес!", true);
     await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
-    await announceAchievements(env, chatId, pet, ctx);
-    await db.save(env, chatId, pet);
     return;
   }
 
@@ -453,16 +452,17 @@ async function handleCallback(env, cq) {
   }
   // data === "status" — просто оновлюємо картку.
 
+  // Нове досягнення показуємо в модалці (разом із тостом дії).
+  const note = achievementNote(pet, ctx);
   await db.save(env, chatId, pet);
-  await answerCb(env, cq.id, toast);
+  const alertText = note ? (toast ? `${toast}\n\n${note}` : note) : toast;
+  await answerCb(env, cq.id, alertText, note.length > 0);
   // Telegram кидає помилку, якщо текст не змінився — глушимо її.
   try {
     await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
   } catch (e) {
     /* "message is not modified" — ігноруємо */
   }
-  await announceAchievements(env, chatId, pet, ctx);
-  await db.save(env, chatId, pet);
 }
 
 // --- Налаштування вебхука (зайти один раз у браузері) ------------------------
