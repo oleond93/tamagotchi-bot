@@ -18,6 +18,17 @@ function dpart(env) {
   return dayPart(Number(env.TZ_OFFSET_HOURS ?? 3));
 }
 
+// Кулдаун між подіями (год). Після події кнопка «Подія» тимчасово «відпочиває».
+const EVENT_COOLDOWN_H = 2;
+
+function humanDur(sec) {
+  const m = Math.ceil(sec / 60);
+  if (m < 60) return `${m} хв`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm ? `${h} год ${mm} хв` : `${h} год`;
+}
+
 // Сповіщає про перехід на нову стадію (включно з вилупленням). Безпечно
 // викликати скрізь — святкує лише те, про що ще не сповіщали.
 async function celebrateEvolutions(env, chatId, pet) {
@@ -78,10 +89,11 @@ function editCard(env, chatId, messageId, text, replyMarkup) {
   });
 }
 
-function answerCb(env, callbackId, text) {
+function answerCb(env, callbackId, text, showAlert = false) {
   return tg(env, "answerCallbackQuery", {
     callback_query_id: callbackId,
     text: text || "",
+    show_alert: showAlert,
   });
 }
 
@@ -382,11 +394,23 @@ async function handleCallback(env, cq) {
     return;
   }
 
-  // Випадкова міні-подія.
+  // Випадкова міні-подія (з кулдауном і прив'язкою до стадії).
   if (data === "evt") {
-    await answerCb(env, cq.id, "🎲");
+    const since = now() - (pet.last_event || 0);
+    const cd = EVENT_COOLDOWN_H * 3600;
+    if (since < cd) {
+      await answerCb(
+        env,
+        cq.id,
+        `🎲 Наступна пригода буде за ${humanDur(cd - since)}. Дай трохи перепочити!`,
+        true
+      );
+      return;
+    }
+    pet.last_event = now();
     await db.save(env, chatId, pet);
-    const ev = randomEvent();
+    await answerCb(env, cq.id, "🎲");
+    const ev = randomEvent(pet.evolutionInfo().index);
     await editCard(env, chatId, messageId, `🎲 <b>Подія!</b>\n\n${ev.text}`, eventKeyboard(ev));
     return;
   }

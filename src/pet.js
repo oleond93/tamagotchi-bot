@@ -137,6 +137,7 @@ export class Pet {
     this.egg_warm_sum = d.egg_warm_sum ?? 0; // Σ тепло·години
     this.egg_hours = d.egg_hours ?? 0; //       Σ години у стадії яйця
     this.temperament = d.temperament ?? null; // фіксується при вилупленні
+    this.last_event = d.last_event ?? 0; //     час останньої події (кулдаун)
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -488,6 +489,7 @@ export class Pet {
       egg_warm_sum: this.egg_warm_sum,
       egg_hours: this.egg_hours,
       temperament: this.temperament,
+      last_event: this.last_event,
     };
   }
 }
