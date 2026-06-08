@@ -400,8 +400,13 @@ async function handleCallback(env, cq) {
     if (data === "wiggle") pet.warmth = Math.min(100, pet.warmth + 3); // дрібний відгук
     pet.interactions += 1;
     await db.save(env, chatId, pet);
-    await answerCb(env, cq.id, data === "listen" ? "👂" : "🤲");
-    await editCard(env, chatId, messageId, `${line}\n\n${pet.statusCard(ctx)}`, mainKeyboard(pet));
+    // Реакція — у модалці (помітно), картка позаду тихо оновлюється.
+    await answerCb(env, cq.id, line, true);
+    try {
+      await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
+    } catch (e) {
+      /* "message is not modified" — ігноруємо */
+    }
     return;
   }
 
@@ -485,11 +490,11 @@ async function handleCallback(env, cq) {
   }
   // data === "status" — просто оновлюємо картку.
 
-  // Нове досягнення показуємо в модалці (разом із тостом дії).
+  // Реакцію на дію (тост) і нове досягнення показуємо в модалці.
   const note = achievementNote(pet, ctx);
   await db.save(env, chatId, pet);
   const alertText = note ? (toast ? `${toast}\n\n${note}` : note) : toast;
-  await answerCb(env, cq.id, alertText, note.length > 0);
+  await answerCb(env, cq.id, alertText, alertText.length > 0);
   // Telegram кидає помилку, якщо текст не змінився — глушимо її.
   try {
     await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
