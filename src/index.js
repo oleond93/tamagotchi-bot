@@ -68,11 +68,16 @@ function mainKeyboard(pet) {
         { text: "🛁 Мити", callback_data: "clean" },
       ],
       [
+        { text: "🌱 Ріст", callback_data: "grow" },
         { text: "🎭 Характер", callback_data: "pers" },
-        { text: "🔄 Оновити", callback_data: "status" },
       ],
+      [{ text: "🔄 Оновити", callback_data: "status" }],
     ],
   };
+}
+
+function backKeyboard() {
+  return { inline_keyboard: [[{ text: "⬅️ Назад", callback_data: "status" }]] };
 }
 
 function personalityKeyboard() {
@@ -257,6 +262,14 @@ async function handleCallback(env, cq) {
   }
   pet.applyDecay();
   pet.last_seen = now();
+
+  // Мапа розвитку.
+  if (data === "grow") {
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "");
+    await editCard(env, chatId, messageId, pet.growthCard(), backKeyboard());
+    return;
+  }
 
   // Підменю вибору характеру.
   if (data === "pers") {

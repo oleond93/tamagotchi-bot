@@ -27,14 +27,14 @@ const ACTION_EFFECTS = {
   clean: { hygiene: +50, mood: +8 },
 };
 
-// Стадії еволюції за віком (у днях).
+// Стадії еволюції: [вік у днях, назва, емодзі, опис].
 const EVOLUTION_STAGES = [
-  [0, "Яйце", "🥚"],
-  [1, "Слизька Грудка", "🫠"],
-  [3, "Дивне Створіння", "👾"],
-  [7, "Хаотичний Монстр", "😈"],
-  [14, "Стародавнє Зло", "🐉"],
-  [30, "Космічна Сутність", "🌌"],
+  [0, "Яйце", "🥚", "тремтить і чогось чекає"],
+  [1, "Слизька Грудка", "🫠", "ще не визначилось, ким бути"],
+  [3, "Дивне Створіння", "👾", "має забагато енергії та думок"],
+  [7, "Хаотичний Монстр", "😈", "офіційно небезпечне (для шкарпеток)"],
+  [14, "Стародавнє Зло", "🐉", "пам'ятає те, чого не було"],
+  [30, "Космічна Сутність", "🌌", "переросло цей чат, але лишилось з тобою"],
 ];
 
 export function now() {
@@ -121,6 +121,84 @@ export class Pet {
     return "😭";
   }
 
+  // Бульбашка-реакція: улюбленець "промовляє" свій стан (без LLM).
+  reactionBubble() {
+    if (!this.alive) return "💀 «...»";
+    const hints = {
+      hunger: "🍽️ «Я голодний...»",
+      energy: "🥱 «Так спати хочу»",
+      mood: "😞 «Мені нуу-удно»",
+      hygiene: "🛁 «Я бруднуля, помий!»",
+      sanity: "🌀 «Реальність якась дивна»",
+    };
+    const w = this.worstNeed();
+    if (w) return hints[w];
+    if (this.avg() >= 80) return "✨ «Все супер, дякую!»";
+    return "🙂 «Все ок»";
+  }
+
+  _humanLeft(daysLeft) {
+    if (daysLeft >= 1) return `~${daysLeft.toFixed(1)} дн`;
+    const h = Math.max(1, Math.ceil(daysLeft * 24));
+    return `~${h} год`;
+  }
+
+  // Інфо про еволюцію: поточна стадія, наступна, прогрес і скільки лишилось.
+  evolutionInfo() {
+    const a = this.ageDays;
+    let i = 0;
+    for (let k = 0; k < EVOLUTION_STAGES.length; k++) {
+      if (a >= EVOLUTION_STAGES[k][0]) i = k;
+    }
+    const cur = EVOLUTION_STAGES[i];
+    const next = EVOLUTION_STAGES[i + 1] || null;
+    let progress = 1;
+    let daysLeft = 0;
+    if (next) {
+      const span = next[0] - cur[0];
+      progress = Math.max(0, Math.min(1, (a - cur[0]) / span));
+      daysLeft = Math.max(0, next[0] - a);
+    }
+    return {
+      index: i,
+      current: { name: cur[1], emoji: cur[2], desc: cur[3] },
+      next: next ? { name: next[1], emoji: next[2], desc: next[3] } : null,
+      progress,
+      daysLeft,
+    };
+  }
+
+  // Компактний рядок прогресу до наступної стадії (для картки стану).
+  growthLine() {
+    const e = this.evolutionInfo();
+    if (!e.next) return "🌌 <b>Фінальна форма!</b> Далі лише легенди.";
+    const n = Math.round(e.progress * 10);
+    const bar = "▰".repeat(n) + "▱".repeat(10 - n);
+    return (
+      `🌱 до ${e.next.emoji} <b>${e.next.name}</b>\n` +
+      `<code>${bar}</code> ${Math.round(e.progress * 100)}% · ${this._humanLeft(e.daysLeft)}`
+    );
+  }
+
+  // Повна мапа розвитку (для окремої картки за кнопкою «🌱 Ріст»).
+  growthCard() {
+    const a = this.ageDays;
+    const info = this.evolutionInfo();
+    const lines = EVOLUTION_STAGES.map((st, idx) => {
+      const [days, sname, semoji] = st;
+      if (idx < info.index) return `✅ ${semoji} ${sname}`;
+      if (idx === info.index) return `📍 ${semoji} <b>${sname}</b> ← зараз`;
+      return `🔒 ${semoji} ${sname} — через ${this._humanLeft(Math.max(0, days - a))}`;
+    });
+    return (
+      `🌱 <b>Шлях розвитку — ${this.name}</b>\n` +
+      `<i>${info.current.desc}</i>\n\n` +
+      lines.join("\n") +
+      "\n\n" +
+      this.growthLine()
+    );
+  }
+
   worstNeed() {
     let worst = STATS[0];
     for (const s of STATS) if (this[s] < this[worst]) worst = s;
@@ -141,11 +219,13 @@ export class Pet {
     });
     const header =
       `${emoji} <b>${this.name}</b> · <i>${name}</i>\n` +
-      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}`;
-    const dead = this.alive
-      ? ""
-      : "\n\n☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
-    return header + "\n\n" + rows.join("\n") + dead;
+      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}\n` +
+      `${this.reactionBubble()}`;
+    if (!this.alive) {
+      return header + "\n\n" + rows.join("\n") +
+        "\n\n☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
+    }
+    return header + "\n\n" + rows.join("\n") + "\n\n" + this.growthLine();
   }
 
   toJSON() {
