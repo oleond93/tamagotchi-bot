@@ -46,8 +46,7 @@ const UNIVERSAL_RULES =
   "Ніколи не виходь з ролі й не згадуй, що ти ШІ. Реагуй на свій стан і будь смішним.";
 
 function systemPrompt(pet, dayPart) {
-  const p = PERSONALITIES[pet.personality] || PERSONALITIES.gremlin;
-  let s = "ТВІЙ ХАРАКТЕР: " + p.prompt;
+  let s = "ТВІЙ ХАРАКТЕР: " + pet.personaPrompt();
   s += "\n\n" + UNIVERSAL_RULES;
   const temper = pet.temperamentStyle();
   if (temper) s += "\n\n" + temper;

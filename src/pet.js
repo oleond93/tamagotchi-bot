@@ -63,6 +63,18 @@ const STAT_ACTION = Object.fromEntries(
   Object.entries(ACTIONS).map(([k, v]) => [v.stat, k])
 );
 
+// Як дії «ліплять» характер під час формувального періоду (стадії 🫠 і 👾).
+// Кожна дія додає ваги певним архетипам — і домінанта поступово зсувається.
+const ACTION_AFFINITY = {
+  feed: { sunshine: 1 },
+  play: { sunshine: 1, gremlin: 1 },
+  clean: { nerd: 1 },
+  sleep: { sleepy: 1 },
+  calm: { philosopher: 1 },
+  talk: { sunshine: 1, drama: 1 },
+  meditate: { philosopher: 1 },
+};
+
 // Вдача — визначається якістю догляду за яйцем (середнє тепло). Впливає на
 // те, як улюбленець спілкується (LLM) та як він підписаний у картці.
 export const TEMPERAMENTS = {
@@ -140,8 +152,12 @@ export class Pet {
   constructor(d = {}) {
     const t = now();
     this.name = d.name ?? "Безіменко";
-    // Характер призначається ВИПАДКОВО при вилупленні (null, поки яйце).
+    // Характер: ваги по архетипах (persona). При вилупленні один отримує перевагу
+    // (рандом), далі дрейфує від догляду; на стадії 😈 застигає (persona_locked).
+    // personality = поточний домінантний архетип (для зручності/сумісності).
     this.personality = d.personality ?? null;
+    this.persona = d.persona ?? null; // {gremlin: 10, sunshine: 3, ...}
+    this.persona_locked = d.persona_locked ?? false;
     this.born_at = d.born_at ?? t;
     this.last_update = d.last_update ?? t;
     this.last_seen = d.last_seen ?? t;
@@ -186,13 +202,24 @@ export class Pet {
     return "wild";
   }
 
-  // Щойно перестали бути яйцем — закріпити вдачу (від догляду) і характер (випадково).
+  // Щойно перестали бути яйцем — закріпити вдачу (від догляду) і завести характер.
   finalizeOnHatch() {
     if (this.isEgg()) return;
     if (!this.temperament) this.temperament = this.computeTemperament();
-    if (!this.personality) {
-      const keys = Object.keys(PERSONALITIES);
-      this.personality = keys[Math.floor(Math.random() * keys.length)];
+    if (!this.persona) {
+      if (this.personality && PERSONALITIES[this.personality]) {
+        // Існуючий улюбленець без persona — зберігаємо його поточний характер.
+        this.persona = { [this.personality]: 10 };
+      } else {
+        const keys = Object.keys(PERSONALITIES);
+        const chosen = keys[Math.floor(Math.random() * keys.length)];
+        this.persona = { [chosen]: 10 };
+        this.personality = chosen;
+      }
+    }
+    // На стадії 😈 (індекс 3) характер остаточно формується.
+    if (!this.persona_locked && this.evolutionInfo().index >= 3) {
+      this.persona_locked = true;
     }
   }
 
@@ -200,10 +227,60 @@ export class Pet {
     return this.temperament ? TEMPERAMENTS[this.temperament].label : "";
   }
 
+  // --- Характер (persona) як суміш архетипів -------------------------------
+  _personaSorted() {
+    return Object.entries(this.persona || {}).sort((a, b) => b[1] - a[1]);
+  }
+
+  dominantPersona() {
+    const e = this._personaSorted();
+    return e.length ? e[0][0] : this.personality;
+  }
+
+  // Чи це «суміш» — другий архетип близький до першого (≥ 60%).
+  isMixedPersona() {
+    const e = this._personaSorted();
+    return e.length >= 2 && e[1][1] > 0 && e[1][1] >= e[0][1] * 0.6;
+  }
+
+  personaForming() {
+    return !!this.persona && !this.persona_locked && !this.isEgg();
+  }
+
   personalityLabel() {
-    return this.personality && PERSONALITIES[this.personality]
-      ? PERSONALITIES[this.personality].label
-      : "";
+    if (!this.persona) {
+      return this.personality && PERSONALITIES[this.personality]
+        ? PERSONALITIES[this.personality].label
+        : "";
+    }
+    const e = this._personaSorted();
+    if (this.isMixedPersona()) {
+      return `${PERSONALITIES[e[0][0]].label} × ${PERSONALITIES[e[1][0]].label}`;
+    }
+    return PERSONALITIES[e[0][0]] ? PERSONALITIES[e[0][0]].label : "";
+  }
+
+  // Текст характеру для LLM (одного архетипу або суміші двох).
+  personaPrompt() {
+    if (!this.persona) {
+      return (PERSONALITIES[this.personality] || PERSONALITIES.gremlin).prompt;
+    }
+    const e = this._personaSorted();
+    if (this.isMixedPersona()) {
+      const a = PERSONALITIES[e[0][0]];
+      const b = PERSONALITIES[e[1][0]];
+      return `Ти — СУМІШ двох характерів, поєднуй риси обох:\n(1) ${a.prompt}\n(2) ${b.prompt}`;
+    }
+    return (PERSONALITIES[e[0][0]] || PERSONALITIES.gremlin).prompt;
+  }
+
+  // Дрейф характеру від догляду (лише у формувальний період).
+  nudgePersona(weights) {
+    if (!weights || this.persona_locked || this.isEgg() || !this.persona) return;
+    for (const [k, w] of Object.entries(weights)) {
+      if (PERSONALITIES[k]) this.persona[k] = (this.persona[k] || 0) + w;
+    }
+    this.personality = this.dominantPersona();
   }
 
   temperamentReveal() {
@@ -227,7 +304,7 @@ export class Pet {
     if (idx === 1) {
       const reveal = this.temperamentReveal();
       const persLine = this.personalityLabel()
-        ? `\n🎭 Характер: <b>${this.personalityLabel()}</b>`
+        ? `\n🎭 Початковий характер: <b>${this.personalityLabel()}</b>\n<i>(ще формуватиметься від твого догляду!)</i>`
         : "";
       return (
         "💥💥💥 <b>ШКАРАЛУПА ТРІСНУЛА!</b>\n\n" +
@@ -237,10 +314,15 @@ export class Pet {
         persLine
       );
     }
+    // На стадії 😈 характер остаточно формується.
+    const persLock =
+      idx === 3 && this.personalityLabel()
+        ? `\n\n🎭 Характер <b>остаточно сформувався</b>: <b>${this.personalityLabel()}</b>!`
+        : "";
     return (
       "✨✨ <b>ЕВОЛЮЦІЯ!</b> ✨✨\n\n" +
       `${semoji} <b>${this.name}</b> росте далі → <i>${sname}</i>\n` +
-      `<i>${desc}</i>${unlockedTxt}`
+      `<i>${desc}</i>${unlockedTxt}${persLock}`
     );
   }
 
@@ -335,6 +417,7 @@ export class Pet {
     this.counts[action] = (this.counts[action] || 0) + 1;
     this.interactions += 1;
     if (STATS.some((s) => this[s] >= 100)) this.flags.maxed = true;
+    this.nudgePersona(ACTION_AFFINITY[action]); // дія ліпить характер
   }
 
   // Застосувати ефекти міні-події (довільний об'єкт stat:delta).
@@ -524,7 +607,10 @@ export class Pet {
     const tod = ctx.dayPart ? `  ·  ${ctx.dayPart.emoji}` : "";
     const idParts = [];
     if (this.temperament) idParts.push(`🧬 ${this.temperamentLabel()}`);
-    if (this.personalityLabel()) idParts.push(`🎭 ${this.personalityLabel()}`);
+    if (this.personalityLabel()) {
+      const forming = this.personaForming() ? " <i>(формується…)</i>" : "";
+      idParts.push(`🎭 ${this.personalityLabel()}${forming}`);
+    }
     const idLine = idParts.length ? `\n${idParts.join("  ·  ")}` : "";
     const header =
       `${emoji} <b>${this.name}</b> · <i>${name}</i>${idLine}\n` +
@@ -541,6 +627,8 @@ export class Pet {
     return {
       name: this.name,
       personality: this.personality,
+      persona: this.persona,
+      persona_locked: this.persona_locked,
       born_at: this.born_at,
       last_update: this.last_update,
       last_seen: this.last_seen,

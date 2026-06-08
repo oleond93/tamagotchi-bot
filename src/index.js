@@ -261,19 +261,20 @@ async function handleUpdate(env, update) {
   if (cmd === "/personality") {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
-    if (!pet.personality) {
+    if (!pet.personalityLabel()) {
       return void (await send(
         env,
         chatId,
-        "🎭 Характер з'явиться, коли яйце вилупиться — і буде призначений <b>випадково</b> 😉"
+        "🎭 Характер з'явиться, коли яйце вилупиться — спершу <b>випадковий</b> 😉"
       ));
     }
-    const p = PERSONALITIES[pet.personality];
+    const status = pet.persona_locked
+      ? "Він уже <b>остаточно сформувався</b> й не зміниться."
+      : "Зараз він <b>формується</b> 🌀 — твій догляд ще може його змінити (аж до стадії 😈).";
     return void (await send(
       env,
       chatId,
-      `🎭 Мій характер: <b>${p.label}</b>\n<i>${p.blurb}.</i>\n\n` +
-        "Він призначається випадково при вилупленні й не змінюється."
+      `🎭 Мій характер: <b>${pet.personalityLabel()}</b>\n\n${status}`
     ));
   }
 
@@ -335,6 +336,7 @@ async function handleUpdate(env, update) {
   pet.last_seen = now();
   pet.interactions += 1;
   pet.chat_count += 1;
+  pet.nudgePersona({ drama: 1 }); // балакучість ліпить «драму»
   registerActivity(pet, env);
   await db.save(env, chatId, pet);
   await celebrateEvolutions(env, chatId, pet);
@@ -437,6 +439,7 @@ async function handleCallback(env, cq) {
       // Прапорці для смішних досягнень.
       if (evId === "e4_cult" && Number(idxStr) === 0) pet.flags.cult = true;
       if (evId === "e3_crush" && Number(idxStr) === 1) pet.flags.heartbreak = true;
+      pet.nudgePersona({ gremlin: 1 }); // пригоди ліплять «ґремліна»
 
       const parts = [];
       for (const s of Object.keys(opt.effects)) {
