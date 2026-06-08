@@ -97,6 +97,33 @@ export class Pet {
     this.purpose = d.purpose ?? 70;
     this.counts = d.counts ?? {}; // лічильники дій: feed/play/sleep/clean/revive/event
     this.achievements = d.achievements ?? []; // id здобутих досягнень
+    // Стадія, про яку власника вже сповістили. Для існуючих улюбленців
+    // (без поля) backfill до поточної — щоб не спамити святкуваннями заднім числом.
+    this.seen_stage = d.seen_stage ?? this.evolutionInfo().index;
+  }
+
+  // Святкове повідомлення про перехід на стадію idx (1 = вилуплення).
+  celebrationFor(idx) {
+    const st = EVOLUTION_STAGES[idx];
+    if (!st) return "";
+    const [, sname, semoji, desc] = st;
+    const prev = new Set(idx > 0 ? STAGE_STATS[idx - 1] : []);
+    const unlocked = (STAGE_STATS[idx] || [])
+      .filter((s) => !prev.has(s))
+      .map((s) => `${STAT_META[s][1]} ${STAT_META[s][0]}`);
+    const unlockedTxt = unlocked.length ? `\n🔓 Відкрито: ${unlocked.join(", ")}` : "";
+    if (idx === 1) {
+      return (
+        "💥💥💥 <b>ШКАРАЛУПА ТРІСНУЛА!</b>\n\n" +
+        `🎉 <b>${this.name} вилупився!</b>\n` +
+        `Тепер це ${semoji} <i>${sname}</i> — ${desc}.${unlockedTxt}`
+      );
+    }
+    return (
+      "✨✨ <b>ЕВОЛЮЦІЯ!</b> ✨✨\n\n" +
+      `${semoji} <b>${this.name}</b> росте далі → <i>${sname}</i>\n` +
+      `<i>${desc}</i>${unlockedTxt}`
+    );
   }
 
   isEgg() {
@@ -375,6 +402,7 @@ export class Pet {
       sanity: this.sanity,
       counts: this.counts,
       achievements: this.achievements,
+      seen_stage: this.seen_stage,
     };
   }
 }

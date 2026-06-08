@@ -17,6 +17,20 @@ function dpart(env) {
   return dayPart(Number(env.TZ_OFFSET_HOURS ?? 3));
 }
 
+// Сповіщає про перехід на нову стадію (включно з вилупленням). Безпечно
+// викликати скрізь — святкує лише те, про що ще не сповіщали.
+async function celebrateEvolutions(env, chatId, pet) {
+  const idx = pet.evolutionInfo().index;
+  let celebrated = false;
+  while (pet.seen_stage < idx) {
+    pet.seen_stage += 1;
+    await send(env, chatId, pet.celebrationFor(pet.seen_stage));
+    celebrated = true;
+  }
+  if (celebrated) await db.save(env, chatId, pet);
+  return celebrated;
+}
+
 // Перевіряє нові досягнення й надсилає привітання за кожне.
 async function announceAchievements(env, chatId, pet, ctx) {
   const fresh = checkNew(pet, ctx);
@@ -130,6 +144,7 @@ async function getPet(env, chatId) {
     pet.applyDecay();
     pet.last_seen = now();
     await db.save(env, chatId, pet);
+    await celebrateEvolutions(env, chatId, pet);
   }
   return pet;
 }
@@ -172,6 +187,7 @@ async function handleUpdate(env, update) {
       pet.applyDecay();
       pet.last_seen = now();
       await db.save(env, chatId, pet);
+      await celebrateEvolutions(env, chatId, pet);
       await send(env, chatId, pet.statusCard({ dayPart: dpart(env) }), mainKeyboard(pet));
     }
     return;
@@ -277,6 +293,7 @@ async function handleUpdate(env, update) {
   pet.applyDecay();
   pet.last_seen = now();
   await db.save(env, chatId, pet);
+  await celebrateEvolutions(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
   const answer = await brain.reply(env, pet, text, dp);
   await send(env, chatId, answer);
@@ -300,6 +317,7 @@ async function handleCallback(env, cq) {
   const ctx = { dayPart: dp };
   pet.applyDecay();
   pet.last_seen = now();
+  await celebrateEvolutions(env, chatId, pet);
 
   // Мапа розвитку.
   if (data === "grow") {
@@ -487,6 +505,8 @@ async function tick(env) {
   for (const { chatId, pet } of pets) {
     pet.applyDecay();
     await db.save(env, chatId, pet);
+    // Проактивно святкуємо вилуплення/еволюцію (часто стається, поки людини нема).
+    await celebrateEvolutions(env, chatId, pet);
     if (!pet.alive) continue;
     if (now() - pet.last_nudge < NUDGE_COOLDOWN_H * 3600) continue;
 
