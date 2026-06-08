@@ -106,6 +106,9 @@ export function now() {
 
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
+// Візуальний роздільник між блоками картки.
+const DIV = "\n──────────\n";
+
 export class Pet {
   constructor(d = {}) {
     const t = now();
@@ -403,9 +406,10 @@ export class Pet {
     });
     return (
       `🌱 <b>Шлях розвитку — ${this.name}</b>\n` +
-      `<i>${info.current.desc}</i>\n\n` +
+      `<i>${info.current.desc}</i>` +
+      DIV +
       lines.join("\n") +
-      "\n\n" +
+      DIV +
       this.growthLine()
     );
   }
@@ -432,10 +436,13 @@ export class Pet {
       const warm = Math.round(this.warmth);
       return (
         `${emoji} <b>${this.name}</b> · <i>Яйце</i>\n` +
-        `🔮 Передчуття: воно буде <b>${eggMystery(this.name)}</b>\n\n` +
-        `${this.eggSign()}\n\n` +
-        `🐣 <b>Вилуплення</b>\n<code>${hatch}</code> ${Math.round(e.progress * 100)}% · ще ${this._humanLeft(e.daysLeft)}\n\n` +
-        `🔥 Тепло ${dot(warm)} <code>${bar(warm)}</code> <b>${warm}%</b>\n` +
+        `🔮 Передчуття: воно буде <b>${eggMystery(this.name)}</b>` +
+        DIV +
+        `${this.eggSign()}` +
+        DIV +
+        `🐣 <b>Вилуплення</b>\n<code>${hatch}</code> ${Math.round(e.progress * 100)}% · ще ${this._humanLeft(e.daysLeft)}` +
+        DIV +
+        `🔥 <b>Тепло</b> ${dot(warm)} <code>${bar(warm)}</code> <b>${warm}%</b>\n` +
         `<i>Гарно грій — і воно вилупиться щасливим 🥰</i>`
       );
     }
@@ -451,10 +458,10 @@ export class Pet {
       `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}\n` +
       `${this.reactionBubble(ctx)}`;
     if (!this.alive) {
-      return header + "\n\n" + rows.join("\n") +
-        "\n\n☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
+      return header + DIV + rows.join("\n") +
+        DIV + "☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
     }
-    return header + "\n\n" + rows.join("\n") + "\n\n" + this.growthLine();
+    return header + DIV + rows.join("\n") + DIV + this.growthLine();
   }
 
   toJSON() {
