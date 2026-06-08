@@ -26,13 +26,70 @@ async function tg(env, method, payload) {
   return resp.json();
 }
 
-function send(env, chatId, text) {
+function send(env, chatId, text, replyMarkup) {
   return tg(env, "sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
+    reply_markup: replyMarkup,
   });
 }
+
+function editCard(env, chatId, messageId, text, replyMarkup) {
+  return tg(env, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "HTML",
+    reply_markup: replyMarkup,
+  });
+}
+
+function answerCb(env, callbackId, text) {
+  return tg(env, "answerCallbackQuery", {
+    callback_query_id: callbackId,
+    text: text || "",
+  });
+}
+
+// --- Inline-клавіатури -------------------------------------------------------
+function mainKeyboard(pet) {
+  if (!pet.alive) {
+    return { inline_keyboard: [[{ text: "⚡ Воскресити", callback_data: "revive" }]] };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: "🍗 Годувати", callback_data: "feed" },
+        { text: "🎮 Гратися", callback_data: "play" },
+      ],
+      [
+        { text: "😴 Спати", callback_data: "sleep" },
+        { text: "🛁 Мити", callback_data: "clean" },
+      ],
+      [
+        { text: "🎭 Характер", callback_data: "pers" },
+        { text: "🔄 Оновити", callback_data: "status" },
+      ],
+    ],
+  };
+}
+
+function personalityKeyboard() {
+  const rows = Object.entries(PERSONALITIES).map(([k, v]) => [
+    { text: v.label, callback_data: "pers:" + k },
+  ]);
+  rows.push([{ text: "⬅️ Назад", callback_data: "status" }]);
+  return { inline_keyboard: rows };
+}
+
+// Маленькі «тости» при натисканні кнопок.
+const ACTION_TOAST = {
+  feed: "🍗 Ням-ням!",
+  play: "🎮 Віііі!",
+  sleep: "😴 Хр-р-р...",
+  clean: "🛁 Чистенький!",
+};
 
 // --- Стан із застосуванням занепаду ------------------------------------------
 async function getPet(env, chatId) {
@@ -56,7 +113,8 @@ const HELP =
   "✏️ /name &lt;ім'я&gt; — перейменувати\n" +
   "🎭 /personality — змінити характер\n" +
   "💀 /revive — воскресити\n\n" +
-  "А ще — просто пиши мені, я люблю балакати 💬";
+  "💡 Найзручніше — кнопками під карткою стану (/status).\n" +
+  "А ще просто пиши мені, я люблю балакати 💬";
 
 const ACTION_FLAVOUR = {
   feed: "🍗 <i>ням-ням</i>... дякую, я вже не з'їм твій роутер сьогодні",
@@ -88,11 +146,10 @@ async function handleUpdate(env, update) {
           "<b>Як ти його назвеш?</b> (просто напиши ім'я)"
       );
     } else {
-      await send(
-        env,
-        chatId,
-        `Твій улюбленець <b>${pet.name}</b> уже з тобою 🫠\nКоманди: /help`
-      );
+      pet.applyDecay();
+      pet.last_seen = now();
+      await db.save(env, chatId, pet);
+      await send(env, chatId, pet.statusCard(), mainKeyboard(pet));
     }
     return;
   }
@@ -102,7 +159,7 @@ async function handleUpdate(env, update) {
   if (cmd === "/status") {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
-    return void (await send(env, chatId, pet.statusCard()));
+    return void (await send(env, chatId, pet.statusCard(), mainKeyboard(pet)));
   }
 
   if (cmd === "/name") {
@@ -151,7 +208,12 @@ async function handleUpdate(env, update) {
       return void (await send(env, chatId, "☠️ Я тимчасово мертвий. Спробуй /revive"));
     pet.doAction(action);
     await db.save(env, chatId, pet);
-    return void (await send(env, chatId, `${ACTION_FLAVOUR[action]}\n\n${pet.statusCard()}`));
+    return void (await send(
+      env,
+      chatId,
+      `${ACTION_FLAVOUR[action]}\n\n${pet.statusCard()}`,
+      mainKeyboard(pet)
+    ));
   }
 
   // --- Вільний текст ---------------------------------------------------------
@@ -162,12 +224,13 @@ async function handleUpdate(env, update) {
     pet.awaiting_name = false;
     pet.name = text.slice(0, 30);
     await db.save(env, chatId, pet);
-    return void (await send(
+    await send(
       env,
       chatId,
       `🎉 <b>${pet.name}</b> — ідеальне ім'я!\n\n` +
-        "Тепер я твоя відповідальність 😈 Доглядай: /help\nІ просто пиши мені."
-    ));
+        "Тепер я твоя відповідальність 😈 Користуйся кнопками нижче, або просто пиши мені 💬"
+    );
+    return void (await send(env, chatId, pet.statusCard(), mainKeyboard(pet)));
   }
 
   if (!pet) return void (await send(env, chatId, "Привіт! Я ще не народився. Напиши /start 🥚"));
@@ -180,12 +243,72 @@ async function handleUpdate(env, update) {
   await send(env, chatId, answer);
 }
 
+// --- Обробка натискань inline-кнопок -----------------------------------------
+async function handleCallback(env, cq) {
+  const chatId = cq.message?.chat?.id;
+  const messageId = cq.message?.message_id;
+  const data = cq.data || "";
+  if (!chatId) return;
+
+  let pet = await db.load(env, chatId);
+  if (!pet) {
+    await answerCb(env, cq.id, "Напиши /start 🥚");
+    return;
+  }
+  pet.applyDecay();
+  pet.last_seen = now();
+
+  // Підменю вибору характеру.
+  if (data === "pers") {
+    await answerCb(env, cq.id, "");
+    await db.save(env, chatId, pet);
+    await editCard(env, chatId, messageId, "🎭 <b>Обери мій характер:</b>", personalityKeyboard());
+    return;
+  }
+  if (data.startsWith("pers:")) {
+    const key = data.slice(5);
+    if (PERSONALITIES[key]) pet.personality = key;
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, PERSONALITIES[key] ? PERSONALITIES[key].label : "");
+    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+    return;
+  }
+
+  if (data === "revive") {
+    pet.revive();
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "⚡ Воскрес!");
+    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+    return;
+  }
+
+  let toast = "";
+  if (["feed", "play", "sleep", "clean"].includes(data)) {
+    if (!pet.alive) {
+      await answerCb(env, cq.id, "Я мертвий 💀 спершу воскреси");
+    } else {
+      pet.doAction(data);
+      toast = ACTION_TOAST[data] || "";
+    }
+  }
+  // data === "status" — просто оновлюємо картку.
+
+  await db.save(env, chatId, pet);
+  await answerCb(env, cq.id, toast);
+  // Telegram кидає помилку, якщо текст не змінився — глушимо її.
+  try {
+    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+  } catch (e) {
+    /* "message is not modified" — ігноруємо */
+  }
+}
+
 // --- Налаштування вебхука (зайти один раз у браузері) ------------------------
 async function setupWebhook(env, origin) {
   const hookUrl = `${origin}/tg/${env.TELEGRAM_TOKEN}`;
   const res = await tg(env, "setWebhook", {
     url: hookUrl,
-    allowed_updates: ["message"],
+    allowed_updates: ["message", "callback_query"],
   });
   return res;
 }
@@ -200,7 +323,11 @@ export default {
     if (request.method === "POST" && url.pathname === `/tg/${env.TELEGRAM_TOKEN}`) {
       try {
         const update = await request.json();
-        ctx.waitUntil(handleUpdate(env, update));
+        if (update.callback_query) {
+          ctx.waitUntil(handleCallback(env, update.callback_query));
+        } else {
+          ctx.waitUntil(handleUpdate(env, update));
+        }
       } catch (e) {
         // мовчки ігноруємо некоректні запити
       }

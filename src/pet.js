@@ -111,6 +111,16 @@ export class Pet {
     return "на межі екзистенційної кризи";
   }
 
+  moodEmoji() {
+    if (!this.alive) return "💀";
+    const a = this.avg();
+    if (a >= 80) return "😄";
+    if (a >= 60) return "🙂";
+    if (a >= 40) return "😐";
+    if (a >= 20) return "😟";
+    return "😭";
+  }
+
   worstNeed() {
     let worst = STATS[0];
     for (const s of STATS) if (this[s] < this[worst]) worst = s;
@@ -119,22 +129,23 @@ export class Pet {
 
   statusCard() {
     const { name, emoji } = this.stage();
-    const bars = STATS.map((s) => {
+    const dot = (v) => (v >= 60 ? "🟢" : v >= 30 ? "🟡" : "🔴");
+    const bar = (v) => {
+      const n = Math.max(0, Math.min(10, Math.round(v / 10)));
+      return "▰".repeat(n) + "▱".repeat(10 - n);
+    };
+    const rows = STATS.map((s) => {
       const [label, em] = STAT_LABELS[s];
-      const val = Math.round(this[s]);
-      const filled = "█".repeat(Math.floor(val / 10));
-      const empty = "░".repeat(10 - Math.floor(val / 10));
-      return `${em} ${label}: ${filled}${empty} ${val}%`;
+      const v = Math.round(this[s]);
+      return `${em} ${label} ${dot(v)}\n<code>${bar(v)}</code> <b>${v}%</b>`;
     });
+    const header =
+      `${emoji} <b>${this.name}</b> · <i>${name}</i>\n` +
+      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}`;
     const dead = this.alive
       ? ""
-      : "\n☠️ <b>Стан: тимчасово мертвий</b> (/revive щоб воскресити)";
-    return (
-      `${emoji} <b>${this.name}</b> — ${name}\n` +
-      `Вік: ${this.ageDays.toFixed(1)} дн. · Настрій: ${this.moodWord()}\n\n` +
-      bars.join("\n") +
-      dead
-    );
+      : "\n\n☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
+    return header + "\n\n" + rows.join("\n") + dead;
   }
 
   toJSON() {
