@@ -2,6 +2,7 @@
 // Чиста логіка, без залежностей від Телеграму чи LLM.
 
 import { eggMystery } from "./egg.js";
+import { PERSONALITIES } from "./personalities.js";
 
 // Повний каталог характеристик (усі можливі). Кожна: [назва, емодзі].
 export const STAT_META = {
@@ -113,7 +114,8 @@ export class Pet {
   constructor(d = {}) {
     const t = now();
     this.name = d.name ?? "Безіменко";
-    this.personality = d.personality ?? "gremlin";
+    // Характер призначається ВИПАДКОВО при вилупленні (null, поки яйце).
+    this.personality = d.personality ?? null;
     this.born_at = d.born_at ?? t;
     this.last_update = d.last_update ?? t;
     this.last_seen = d.last_seen ?? t;
@@ -150,14 +152,24 @@ export class Pet {
     return "wild";
   }
 
-  // Зафіксувати вдачу, щойно перестали бути яйцем (одноразово).
-  finalizeTemperament() {
-    if (this.temperament || this.isEgg()) return;
-    this.temperament = this.computeTemperament();
+  // Щойно перестали бути яйцем — закріпити вдачу (від догляду) і характер (випадково).
+  finalizeOnHatch() {
+    if (this.isEgg()) return;
+    if (!this.temperament) this.temperament = this.computeTemperament();
+    if (!this.personality) {
+      const keys = Object.keys(PERSONALITIES);
+      this.personality = keys[Math.floor(Math.random() * keys.length)];
+    }
   }
 
   temperamentLabel() {
     return this.temperament ? TEMPERAMENTS[this.temperament].label : "";
+  }
+
+  personalityLabel() {
+    return this.personality && PERSONALITIES[this.personality]
+      ? PERSONALITIES[this.personality].label
+      : "";
   }
 
   temperamentReveal() {
@@ -180,11 +192,15 @@ export class Pet {
     const unlockedTxt = unlocked.length ? `\n🔓 Відкрито: ${unlocked.join(", ")}` : "";
     if (idx === 1) {
       const reveal = this.temperamentReveal();
+      const persLine = this.personalityLabel()
+        ? `\n🎭 Характер: <b>${this.personalityLabel()}</b>`
+        : "";
       return (
         "💥💥💥 <b>ШКАРАЛУПА ТРІСНУЛА!</b>\n\n" +
         `🎉 <b>${this.name} вилупився!</b>\n` +
         `Тепер це ${semoji} <i>${sname}</i> — ${desc}.${unlockedTxt}` +
-        (reveal ? `\n\n${reveal}` : "")
+        (reveal ? `\n\n${reveal}` : "") +
+        persLine
       );
     }
     return (
@@ -258,8 +274,8 @@ export class Pet {
         this.alive = false;
       }
     }
-    // Якщо щойно вилупилось — закріпити вдачу.
-    this.finalizeTemperament();
+    // Якщо щойно вилупилось — закріпити вдачу й характер.
+    this.finalizeOnHatch();
   }
 
   doAction(action) {
@@ -453,9 +469,12 @@ export class Pet {
       return `${em} ${label} ${dot(v)}\n<code>${bar(v)}</code> <b>${v}%</b>`;
     });
     const tod = ctx.dayPart ? `  ·  ${ctx.dayPart.emoji}` : "";
-    const temper = this.temperament ? `\n🧬 Вдача: ${this.temperamentLabel()}` : "";
+    const idParts = [];
+    if (this.temperament) idParts.push(`🧬 ${this.temperamentLabel()}`);
+    if (this.personalityLabel()) idParts.push(`🎭 ${this.personalityLabel()}`);
+    const idLine = idParts.length ? `\n${idParts.join("  ·  ")}` : "";
     const header =
-      `${emoji} <b>${this.name}</b> · <i>${name}</i>${temper}\n` +
+      `${emoji} <b>${this.name}</b> · <i>${name}</i>${idLine}\n` +
       `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}\n` +
       `${this.reactionBubble(ctx)}`;
     if (!this.alive) {

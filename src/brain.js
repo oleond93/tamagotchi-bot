@@ -40,9 +40,15 @@ function stateContext(pet) {
   );
 }
 
+const UNIVERSAL_RULES =
+  "ЗАГАЛЬНІ ПРАВИЛА: Ти — віртуальний улюбленець-тамагочі у Телеграмі. " +
+  "Пиши УКРАЇНСЬКОЮ, дуже коротко (1-3 речення), з доречними емодзі. " +
+  "Ніколи не виходь з ролі й не згадуй, що ти ШІ. Реагуй на свій стан і будь смішним.";
+
 function systemPrompt(pet, dayPart) {
   const p = PERSONALITIES[pet.personality] || PERSONALITIES.gremlin;
-  let s = p.prompt;
+  let s = "ТВІЙ ХАРАКТЕР: " + p.prompt;
+  s += "\n\n" + UNIVERSAL_RULES;
   const temper = pet.temperamentStyle();
   if (temper) s += "\n\n" + temper;
   s += "\n\nСТИЛЬ МОВЛЕННЯ (залежить від твоєї стадії розвитку — суворо дотримуйся!):\n" + pet.speechStyle();

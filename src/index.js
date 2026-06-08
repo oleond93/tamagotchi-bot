@@ -116,12 +116,9 @@ function mainKeyboard(pet) {
   ]);
   rows.push([
     { text: "🏆 Досягнення", callback_data: "ach" },
-    { text: "🎭 Характер", callback_data: "pers" },
-  ]);
-  rows.push([
     { text: "📖 Гайд", callback_data: "guide" },
-    { text: "🔄 Оновити", callback_data: "status" },
   ]);
+  rows.push([{ text: "🔄 Оновити", callback_data: "status" }]);
   return { inline_keyboard: rows };
 }
 
@@ -143,14 +140,6 @@ function guideText(page) {
 
 function backKeyboard() {
   return { inline_keyboard: [[{ text: "⬅️ Назад", callback_data: "status" }]] };
-}
-
-function personalityKeyboard() {
-  const rows = Object.entries(PERSONALITIES).map(([k, v]) => [
-    { text: v.label, callback_data: "pers:" + k },
-  ]);
-  rows.push([{ text: "⬅️ Назад", callback_data: "status" }]);
-  return { inline_keyboard: rows };
 }
 
 function eventKeyboard(ev) {
@@ -182,7 +171,8 @@ const HELP =
   "📖 /guide — лор і як усе працює (раджу почати з нього!)\n" +
   "🌱 кнопка «Ріст» — що відкриється далі\n" +
   "🏆 кнопка «Досягнення» · 🎲 «Подія»\n" +
-  "✏️ /name &lt;ім'я&gt; · 🎭 /personality · 💀 /revive\n\n" +
+  "🎭 /personality — мій характер (призначається випадково при вилупленні)\n" +
+  "✏️ /name &lt;ім'я&gt; · 💀 /revive\n\n" +
   "💡 Найзручніше — кнопками під карткою (/status). " +
   "А ще просто пиши мені, я люблю балакати 💬";
 
@@ -247,20 +237,20 @@ async function handleUpdate(env, update) {
   if (cmd === "/personality") {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
-    const key = arg.toLowerCase();
-    if (!PERSONALITIES[key]) {
-      const opts = Object.entries(PERSONALITIES)
-        .map(([k, v]) => `• <code>${k}</code> — ${v.label}`)
-        .join("\n");
+    if (!pet.personality) {
       return void (await send(
         env,
         chatId,
-        `Обери характер:\n${opts}\n\nНапр.: <code>/personality philosopher</code>`
+        "🎭 Характер з'явиться, коли яйце вилупиться — і буде призначений <b>випадково</b> 😉"
       ));
     }
-    pet.personality = key;
-    await db.save(env, chatId, pet);
-    return void (await send(env, chatId, `Окей, мій характер: ${PERSONALITIES[key].label}`));
+    const p = PERSONALITIES[pet.personality];
+    return void (await send(
+      env,
+      chatId,
+      `🎭 Мій характер: <b>${p.label}</b>\n<i>${p.blurb}.</i>\n\n` +
+        "Він призначається випадково при вилупленні й не змінюється."
+    ));
   }
 
   if (cmd === "/revive") {
@@ -437,22 +427,6 @@ async function handleCallback(env, cq) {
     await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
     await announceAchievements(env, chatId, pet, ctx);
     await db.save(env, chatId, pet);
-    return;
-  }
-
-  // Підменю вибору характеру.
-  if (data === "pers") {
-    await answerCb(env, cq.id, "");
-    await db.save(env, chatId, pet);
-    await editCard(env, chatId, messageId, "🎭 <b>Обери мій характер:</b>", personalityKeyboard());
-    return;
-  }
-  if (data.startsWith("pers:")) {
-    const key = data.slice(5);
-    if (PERSONALITIES[key]) pet.personality = key;
-    await db.save(env, chatId, pet);
-    await answerCb(env, cq.id, PERSONALITIES[key] ? PERSONALITIES[key].label : "");
-    await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
     return;
   }
 
