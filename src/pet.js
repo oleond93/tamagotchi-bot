@@ -107,7 +107,7 @@ export function now() {
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
 // Візуальний роздільник між блоками картки.
-const DIV = "\n──────────\n";
+const DIV = "\n┈┈┈┈┈┈┈┈┈┈\n";
 
 export class Pet {
   constructor(d = {}) {
