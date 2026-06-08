@@ -559,8 +559,8 @@ export default {
   },
 };
 
-const NUDGE_COOLDOWN_H = 6;
-const SILENT_HOURS_H = 10;
+const NUDGE_COOLDOWN_H = 2;
+const SILENT_HOURS_H = 4;
 const NUDGE_CHANCE = 0.5;
 
 async function tick(env) {
