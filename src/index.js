@@ -174,6 +174,22 @@ function petMenu() {
   };
 }
 
+// Постійну клавіатуру Telegram показує лише разом із повідомленням, що її несе.
+// Картка/inline-кнопки несуть власну (inline) клавіатуру, тож тут одноразово
+// надсилаємо окреме повідомлення з reply-клавіатурою — щоб вона з'явилась навіть
+// тим, хто лише тисне кнопки й ніколи не пише в чат.
+async function ensureMenu(env, chatId, pet) {
+  if (!pet || pet.menu_set) return;
+  await send(
+    env,
+    chatId,
+    "⌨️ Готово! Кнопки <b>«📊 Картка»</b> і <b>«📖 Гайд»</b> тепер завжди біля поля вводу 👇",
+    petMenu()
+  );
+  pet.menu_set = true;
+  await db.save(env, chatId, pet);
+}
+
 function eventKeyboard(ev) {
   return {
     inline_keyboard: ev.options.map((o, i) => [
@@ -191,6 +207,7 @@ async function getPet(env, chatId) {
     registerActivity(pet, env);
     await db.save(env, chatId, pet);
     await celebrateEvolutions(env, chatId, pet);
+    await ensureMenu(env, chatId, pet);
   }
   return pet;
 }
@@ -242,6 +259,7 @@ async function handleUpdate(env, update) {
       registerActivity(pet, env);
       await db.save(env, chatId, pet);
       await celebrateEvolutions(env, chatId, pet);
+      await ensureMenu(env, chatId, pet);
       await send(env, chatId, pet.statusCard({ dayPart: dpart(env) }), mainKeyboard(pet));
     }
     return;
@@ -343,6 +361,8 @@ async function handleUpdate(env, update) {
         (note ? `\n\n${note}` : ""),
       petMenu()
     );
+    pet.menu_set = true; // клавіатуру вже надіслали
+    await db.save(env, chatId, pet);
     await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
     return;
   }
@@ -363,6 +383,7 @@ async function handleUpdate(env, update) {
   const note = achievementNote(pet, { dayPart: dp });
   // Постійна клавіатура — щоб картку було легко повернути після листування.
   await send(env, chatId, answer + (note ? `\n\n${note}` : ""), petMenu());
+  pet.menu_set = true; // клавіатуру вже надіслали — ensureMenu більше не потрібен
   await db.save(env, chatId, pet);
 }
 
@@ -384,6 +405,7 @@ async function handleCallback(env, cq) {
   pet.last_seen = now();
   registerActivity(pet, env);
   await celebrateEvolutions(env, chatId, pet);
+  await ensureMenu(env, chatId, pet);
 
   // Гайд / лор (гортається сторінками).
   if (data === "guide" || data.startsWith("guide:")) {

@@ -200,6 +200,7 @@ export class Pet {
     this.best_streak = d.best_streak ?? 0;
     this.last_active_day = d.last_active_day ?? 0; // день останньої активності
     this.flags = d.flags ?? {}; //                разові «моменти»: maxed/red/froze/cult/...
+    this.menu_set = d.menu_set ?? false; //       чи вже надсилали постійну клавіатуру
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -671,6 +672,7 @@ export class Pet {
       best_streak: this.best_streak,
       last_active_day: this.last_active_day,
       flags: this.flags,
+      menu_set: this.menu_set,
     };
   }
 }
