@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS pets (
+  chat_id INTEGER PRIMARY KEY,
+  data    TEXT NOT NULL
+);
