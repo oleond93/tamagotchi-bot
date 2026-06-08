@@ -163,6 +163,17 @@ function backKeyboard() {
   return { inline_keyboard: [[{ text: "⬅️ Назад", callback_data: "status" }]] };
 }
 
+// Постійна клавіатура біля поля вводу — щоб картку (з inline-кнопками догляду)
+// можна було повернути одним тапом будь-коли, навіть коли вона поїхала вгору
+// під час листування. Кнопки шлють звичайний текст, який ми мапимо на команди.
+function petMenu() {
+  return {
+    keyboard: [[{ text: "📊 Картка" }, { text: "📖 Гайд" }]],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
 function eventKeyboard(ev) {
   return {
     inline_keyboard: ev.options.map((o, i) => [
@@ -195,7 +206,8 @@ const HELP =
   "🏆 кнопка «Досягнення» · 🎲 «Подія»\n" +
   "🎭 /personality — мій характер (призначається випадково при вилупленні)\n" +
   "✏️ /name &lt;ім'я&gt; · 💀 /revive\n\n" +
-  "💡 Найзручніше — кнопками під карткою (/status). " +
+  "💡 Найзручніше — кнопками під карткою (/status). Якщо вона поїхала вгору під час балачки — " +
+  "поверни її кнопкою <b>«📊 Картка»</b> біля поля вводу (вона завжди там).\n" +
   "А ще просто пиши мені, я люблю балакати 💬";
 
 // --- Обробка одного оновлення від Телеграму ----------------------------------
@@ -203,7 +215,10 @@ async function handleUpdate(env, update) {
   const msg = update.message;
   if (!msg || !msg.text) return;
   const chatId = msg.chat.id;
-  const text = msg.text.trim();
+  let text = msg.text.trim();
+  // Кнопки постійної клавіатури приходять як звичайний текст — переводимо в команди.
+  if (text === "📊 Картка") text = "/status";
+  else if (text === "📖 Гайд") text = "/guide";
   const cmd = text.split(/\s+/)[0].split("@")[0].toLowerCase();
   const arg = text.slice(cmd.length).trim();
 
@@ -232,7 +247,7 @@ async function handleUpdate(env, update) {
     return;
   }
 
-  if (cmd === "/help") return void (await send(env, chatId, HELP));
+  if (cmd === "/help") return void (await send(env, chatId, HELP, petMenu()));
 
   if (cmd === "/guide") {
     return void (await send(env, chatId, guideText(0), guideKeyboard(0)));
@@ -323,8 +338,10 @@ async function handleUpdate(env, update) {
       chatId,
       `🎉 <b>${pet.name}</b> — ідеальне ім'я!\n\n` +
         "Яйце ніби почуло — і вдоволено пульснуло теплом 🥚💛 Тепер воно твоя відповідальність. Грій його кнопкою «🔥 Гріти», а як стане нудно — пиши мені 💬\n\n" +
-        "📖 <b>Новачок?</b> Тисни «Гайд» під карткою — там усе про те, що тут відбувається." +
-        (note ? `\n\n${note}` : "")
+        "📖 <b>Новачок?</b> Тисни «Гайд» — там усе про те, що тут відбувається.\n\n" +
+        "💡 Кнопки <b>«📊 Картка» та «📖 Гайд»</b> біля поля вводу — завжди під рукою." +
+        (note ? `\n\n${note}` : ""),
+      petMenu()
     );
     await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
     return;
@@ -344,7 +361,8 @@ async function handleUpdate(env, update) {
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
   const answer = await brain.reply(env, pet, text, dp);
   const note = achievementNote(pet, { dayPart: dp });
-  await send(env, chatId, answer + (note ? `\n\n${note}` : ""));
+  // Постійна клавіатура — щоб картку було легко повернути після листування.
+  await send(env, chatId, answer + (note ? `\n\n${note}` : ""), petMenu());
   await db.save(env, chatId, pet);
 }
 
