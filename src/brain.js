@@ -40,9 +40,13 @@ function stateContext(pet) {
   );
 }
 
-function systemPrompt(pet) {
+function systemPrompt(pet, dayPart) {
   const p = PERSONALITIES[pet.personality] || PERSONALITIES.gremlin;
-  return p.prompt + "\n\nКОНТЕКСТ ТВОГО СТАНУ:\n" + stateContext(pet);
+  let s = p.prompt;
+  s += "\n\nСТИЛЬ МОВЛЕННЯ (залежить від твоєї стадії розвитку — суворо дотримуйся!):\n" + pet.speechStyle();
+  if (dayPart) s += "\n\nПОРА ДОБИ: " + dayPart.note;
+  s += "\n\nКОНТЕКСТ ТВОГО СТАНУ:\n" + stateContext(pet);
+  return s;
 }
 
 async function chat(env, system, user, { maxTokens = 200, temperature = 1.0 } = {}) {
@@ -107,21 +111,21 @@ export async function diag(env) {
   return out;
 }
 
-export async function reply(env, pet, userText) {
+export async function reply(env, pet, userText, dayPart) {
   try {
-    const out = await chat(env, systemPrompt(pet), userText);
+    const out = await chat(env, systemPrompt(pet, dayPart), userText);
     return out || pick(FALLBACK);
   } catch {
     return pick(FALLBACK);
   }
 }
 
-export async function nudge(env, pet) {
+export async function nudge(env, pet, dayPart) {
   const prompt =
     "Напиши КОРОТКЕ (1-2 речення) спонтанне повідомлення власнику ПЕРШИМ, " +
     "ніби ти нудьгуєш або тобі щось потрібно. Будь абсурдним і смішним.";
   try {
-    const out = await chat(env, systemPrompt(pet), prompt, {
+    const out = await chat(env, systemPrompt(pet, dayPart), prompt, {
       maxTokens: 120,
       temperature: 1.1,
     });

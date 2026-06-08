@@ -6,7 +6,24 @@
 import * as brain from "./brain.js";
 import * as db from "./db.js";
 import { PERSONALITIES } from "./personalities.js";
-import { Pet, now } from "./pet.js";
+import { Pet, now, dayPart } from "./pet.js";
+import { checkNew, achievementsCard } from "./achievements.js";
+import { randomEvent, findEvent } from "./events.js";
+
+// Пора доби з урахуванням TZ (типово Київ, +3). Кожен deployer може змінити
+// змінною TZ_OFFSET_HOURS у дашборді.
+function dpart(env) {
+  return dayPart(Number(env.TZ_OFFSET_HOURS ?? 3));
+}
+
+// Перевіряє нові досягнення й надсилає привітання за кожне.
+async function announceAchievements(env, chatId, pet, ctx) {
+  const fresh = checkNew(pet, ctx);
+  for (const a of fresh) {
+    await send(env, chatId, `🏆 <b>Нове досягнення!</b>\n${a.emoji} <b>${a.title}</b>\n<i>${a.desc}</i>`);
+  }
+  return fresh.length > 0;
+}
 
 // Створює таблицю, якщо її ще немає (щоб творцю не запускати міграції вручну).
 async function ensureSchema(env) {
@@ -68,7 +85,11 @@ function mainKeyboard(pet) {
         { text: "🛁 Мити", callback_data: "clean" },
       ],
       [
+        { text: "🎲 Подія", callback_data: "evt" },
         { text: "🌱 Ріст", callback_data: "grow" },
+      ],
+      [
+        { text: "🏆 Досягнення", callback_data: "ach" },
         { text: "🎭 Характер", callback_data: "pers" },
       ],
       [{ text: "🔄 Оновити", callback_data: "status" }],
@@ -86,6 +107,14 @@ function personalityKeyboard() {
   ]);
   rows.push([{ text: "⬅️ Назад", callback_data: "status" }]);
   return { inline_keyboard: rows };
+}
+
+function eventKeyboard(ev) {
+  return {
+    inline_keyboard: ev.options.map((o, i) => [
+      { text: o.text, callback_data: `evc:${ev.id}:${i}` },
+    ]),
+  };
 }
 
 // Маленькі «тости» при натисканні кнопок.
@@ -154,7 +183,7 @@ async function handleUpdate(env, update) {
       pet.applyDecay();
       pet.last_seen = now();
       await db.save(env, chatId, pet);
-      await send(env, chatId, pet.statusCard(), mainKeyboard(pet));
+      await send(env, chatId, pet.statusCard({ dayPart: dpart(env) }), mainKeyboard(pet));
     }
     return;
   }
@@ -164,7 +193,11 @@ async function handleUpdate(env, update) {
   if (cmd === "/status") {
     const pet = await getPet(env, chatId);
     if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
-    return void (await send(env, chatId, pet.statusCard(), mainKeyboard(pet)));
+    const dp = dpart(env);
+    await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
+    await announceAchievements(env, chatId, pet, { dayPart: dp });
+    await db.save(env, chatId, pet);
+    return;
   }
 
   if (cmd === "/name") {
@@ -212,13 +245,17 @@ async function handleUpdate(env, update) {
     if (!pet.alive)
       return void (await send(env, chatId, "☠️ Я тимчасово мертвий. Спробуй /revive"));
     pet.doAction(action);
+    const dp = dpart(env);
     await db.save(env, chatId, pet);
-    return void (await send(
+    await send(
       env,
       chatId,
-      `${ACTION_FLAVOUR[action]}\n\n${pet.statusCard()}`,
+      `${ACTION_FLAVOUR[action]}\n\n${pet.statusCard({ dayPart: dp })}`,
       mainKeyboard(pet)
-    ));
+    );
+    await announceAchievements(env, chatId, pet, { dayPart: dp });
+    await db.save(env, chatId, pet);
+    return;
   }
 
   // --- Вільний текст ---------------------------------------------------------
@@ -228,6 +265,7 @@ async function handleUpdate(env, update) {
   if (pet && pet.awaiting_name) {
     pet.awaiting_name = false;
     pet.name = text.slice(0, 30);
+    const dp = dpart(env);
     await db.save(env, chatId, pet);
     await send(
       env,
@@ -235,17 +273,23 @@ async function handleUpdate(env, update) {
       `🎉 <b>${pet.name}</b> — ідеальне ім'я!\n\n` +
         "Тепер я твоя відповідальність 😈 Користуйся кнопками нижче, або просто пиши мені 💬"
     );
-    return void (await send(env, chatId, pet.statusCard(), mainKeyboard(pet)));
+    await send(env, chatId, pet.statusCard({ dayPart: dp }), mainKeyboard(pet));
+    await announceAchievements(env, chatId, pet, { dayPart: dp });
+    await db.save(env, chatId, pet);
+    return;
   }
 
   if (!pet) return void (await send(env, chatId, "Привіт! Я ще не народився. Напиши /start 🥚"));
 
+  const dp = dpart(env);
   pet.applyDecay();
   pet.last_seen = now();
   await db.save(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
-  const answer = await brain.reply(env, pet, text);
+  const answer = await brain.reply(env, pet, text, dp);
   await send(env, chatId, answer);
+  await announceAchievements(env, chatId, pet, { dayPart: dp });
+  await db.save(env, chatId, pet);
 }
 
 // --- Обробка натискань inline-кнопок -----------------------------------------
@@ -260,6 +304,8 @@ async function handleCallback(env, cq) {
     await answerCb(env, cq.id, "Напиши /start 🥚");
     return;
   }
+  const dp = dpart(env);
+  const ctx = { dayPart: dp };
   pet.applyDecay();
   pet.last_seen = now();
 
@@ -268,6 +314,45 @@ async function handleCallback(env, cq) {
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, "");
     await editCard(env, chatId, messageId, pet.growthCard(), backKeyboard());
+    return;
+  }
+
+  // Досягнення.
+  if (data === "ach") {
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "");
+    await editCard(env, chatId, messageId, achievementsCard(pet), backKeyboard());
+    return;
+  }
+
+  // Випадкова міні-подія.
+  if (data === "evt") {
+    await answerCb(env, cq.id, "🎲");
+    await db.save(env, chatId, pet);
+    const ev = randomEvent();
+    await editCard(env, chatId, messageId, `🎲 <b>Подія!</b>\n\n${ev.text}`, eventKeyboard(ev));
+    return;
+  }
+  // Вибір у міні-події: evc:<id>:<index>
+  if (data.startsWith("evc:")) {
+    const [, evId, idxStr] = data.split(":");
+    const ev = findEvent(evId);
+    const opt = ev?.options[Number(idxStr)];
+    if (opt) {
+      pet.applyEffects(opt.effects);
+      pet.counts.event = (pet.counts.event || 0) + 1;
+    }
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "🎲");
+    await editCard(
+      env,
+      chatId,
+      messageId,
+      `${opt ? opt.result : "..."}\n\n${pet.statusCard(ctx)}`,
+      mainKeyboard(pet)
+    );
+    await announceAchievements(env, chatId, pet, ctx);
+    await db.save(env, chatId, pet);
     return;
   }
 
@@ -283,7 +368,7 @@ async function handleCallback(env, cq) {
     if (PERSONALITIES[key]) pet.personality = key;
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, PERSONALITIES[key] ? PERSONALITIES[key].label : "");
-    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+    await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
     return;
   }
 
@@ -291,7 +376,9 @@ async function handleCallback(env, cq) {
     pet.revive();
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, "⚡ Воскрес!");
-    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+    await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
+    await announceAchievements(env, chatId, pet, ctx);
+    await db.save(env, chatId, pet);
     return;
   }
 
@@ -310,10 +397,12 @@ async function handleCallback(env, cq) {
   await answerCb(env, cq.id, toast);
   // Telegram кидає помилку, якщо текст не змінився — глушимо її.
   try {
-    await editCard(env, chatId, messageId, pet.statusCard(), mainKeyboard(pet));
+    await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
   } catch (e) {
     /* "message is not modified" — ігноруємо */
   }
+  await announceAchievements(env, chatId, pet, ctx);
+  await db.save(env, chatId, pet);
 }
 
 // --- Налаштування вебхука (зайти один раз у браузері) ------------------------
@@ -387,6 +476,9 @@ const NUDGE_CHANCE = 0.5;
 
 async function tick(env) {
   await ensureSchema(env);
+  const dp = dpart(env);
+  // Уночі не турбуємо — люди сплять.
+  if (dp.key === "night") return;
   const pets = await db.allPets(env);
   for (const { chatId, pet } of pets) {
     pet.applyDecay();
@@ -400,7 +492,7 @@ async function tick(env) {
     if (Math.random() > NUDGE_CHANCE) continue;
 
     try {
-      const txt = await brain.nudge(env, pet);
+      const txt = await brain.nudge(env, pet, dp);
       await send(env, chatId, txt);
       pet.last_nudge = now();
       await db.save(env, chatId, pet);

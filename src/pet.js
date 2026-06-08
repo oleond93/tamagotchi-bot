@@ -59,6 +59,8 @@ export class Pet {
     this.mood = d.mood ?? 80;
     this.hygiene = d.hygiene ?? 80;
     this.sanity = d.sanity ?? 70;
+    this.counts = d.counts ?? {}; // лічильники дій: feed/play/sleep/clean/revive
+    this.achievements = d.achievements ?? []; // id здобутих досягнень
   }
 
   get ageDays() {
@@ -93,12 +95,22 @@ export class Pet {
     for (const [stat, delta] of Object.entries(ACTION_EFFECTS[action] || {})) {
       this[stat] = clamp(this[stat] + delta);
     }
+    this.counts[action] = (this.counts[action] || 0) + 1;
+  }
+
+  // Застосувати ефекти міні-події (довільний об'єкт stat:delta).
+  applyEffects(effects) {
+    this.applyDecay();
+    for (const [stat, delta] of Object.entries(effects || {})) {
+      if (STATS.includes(stat)) this[stat] = clamp(this[stat] + delta);
+    }
   }
 
   revive() {
     this.alive = true;
     for (const s of STATS) this[s] = 60;
     this.last_update = now();
+    this.counts.revive = (this.counts.revive || 0) + 1;
   }
 
   moodWord() {
@@ -122,8 +134,13 @@ export class Pet {
   }
 
   // Бульбашка-реакція: улюбленець "промовляє" свій стан (без LLM).
-  reactionBubble() {
+  // ctx.dayPart — об'єкт пори доби (необов'язково).
+  reactionBubble(ctx = {}) {
     if (!this.alive) return "💀 «...»";
+    // Уночі — сонний, якщо немає чогось критичного.
+    if (ctx.dayPart?.key === "night" && !this.worstNeed()) {
+      return "😴 «Хр-р-р... я ж сплю...»";
+    }
     const hints = {
       hunger: "🍽️ «Я голодний...»",
       energy: "🥱 «Так спати хочу»",
@@ -135,6 +152,19 @@ export class Pet {
     if (w) return hints[w];
     if (this.avg() >= 80) return "✨ «Все супер, дякую!»";
     return "🙂 «Все ок»";
+  }
+
+  // Стиль мовлення для LLM залежно від стадії розвитку.
+  speechStyle() {
+    const styles = [
+      "Ти ще ЯЙЦЕ — говорити майже не вмієш. Лише прості звуки та *дії в зірочках*, максимум одне-два простих слова. Дуже-дуже коротко.",
+      "Ти щойно вилупився, ти НЕМОВЛЯ. Говори як малюк: окремі слова, 'агу', плутаєш звуки, дуже прості фрази, мило й безпорадно.",
+      "Ти ДИТИНА: цікавий до всього, ставиш багато простих питань, легко захоплюєшся, словник простий, багато емоцій.",
+      "Ти ПІДЛІТОК: зухвалий, саркастичний, сленг, закочуєш очі — але в глибині потребуєш уваги.",
+      "Ти ДОРОСЛИЙ і мудрий: говориш складно, красномовно, драматично, з відсиланнями до 'давніх спогадів'.",
+      "Ти КОСМІЧНА СУТНІСТЬ: говориш загадково, ніби знаєш таємниці всесвіту, змішуючи глибоку мудрість з абсурдом.",
+    ];
+    return styles[this.evolutionInfo().index] || "";
   }
 
   _humanLeft(daysLeft) {
@@ -205,7 +235,7 @@ export class Pet {
     return this[worst] < 40 ? worst : null;
   }
 
-  statusCard() {
+  statusCard(ctx = {}) {
     const { name, emoji } = this.stage();
     const dot = (v) => (v >= 60 ? "🟢" : v >= 30 ? "🟡" : "🔴");
     const bar = (v) => {
@@ -217,10 +247,11 @@ export class Pet {
       const v = Math.round(this[s]);
       return `${em} ${label} ${dot(v)}\n<code>${bar(v)}</code> <b>${v}%</b>`;
     });
+    const tod = ctx.dayPart ? `  ·  ${ctx.dayPart.emoji}` : "";
     const header =
       `${emoji} <b>${this.name}</b> · <i>${name}</i>\n` +
-      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}\n` +
-      `${this.reactionBubble()}`;
+      `🎂 ${this.ageDays.toFixed(1)} дн.  ·  ${this.moodEmoji()} ${this.moodWord()}${tod}\n` +
+      `${this.reactionBubble(ctx)}`;
     if (!this.alive) {
       return header + "\n\n" + rows.join("\n") +
         "\n\n☠️ <b>Тимчасово мертвий.</b> Тисни «⚡ Воскресити».";
@@ -243,6 +274,40 @@ export class Pet {
       mood: this.mood,
       hygiene: this.hygiene,
       sanity: this.sanity,
+      counts: this.counts,
+      achievements: this.achievements,
     };
   }
+}
+
+// Пора доби з урахуванням зсуву часового поясу (TZ_OFFSET_HOURS, типово Київ +3).
+export function dayPart(offsetHours = 0) {
+  const h = new Date(Date.now() + offsetHours * 3600 * 1000).getUTCHours();
+  if (h < 6)
+    return {
+      key: "night",
+      emoji: "🌙",
+      label: "ніч",
+      note: "Зараз глибока ніч — ти сонний, позіхаєш, говориш мляво й трохи бурчиш, що тебе потурбували.",
+    };
+  if (h < 12)
+    return {
+      key: "morning",
+      emoji: "🌅",
+      label: "ранок",
+      note: "Зараз ранок — ти бадьорий, енергійний та оптимістичний.",
+    };
+  if (h < 18)
+    return {
+      key: "day",
+      emoji: "☀️",
+      label: "день",
+      note: "Зараз день — звичайний робочий настрій.",
+    };
+  return {
+    key: "evening",
+    emoji: "🌆",
+    label: "вечір",
+    note: "Зараз вечір — ти розслаблений, трохи філософський, готуєшся до сну.",
+  };
 }
