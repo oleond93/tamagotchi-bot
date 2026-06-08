@@ -2,6 +2,10 @@ name = "tamagotchi-bot"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# Не затирати змінні/секрети, задані в дашборді, при деплої.
+# Завдяки цьому кожен сам обирає модель і ключі — деплой їх не скидає.
+keep_vars = true
+
 # Cron: раз на годину — занепад стану + проактивні нагадування.
 [triggers]
 crontab = ["0 * * * *"]
@@ -13,12 +17,12 @@ binding = "DB"
 database_name = "tamagotchi"
 database_id = "b3327f4f-39b7-476a-9581-e452bce88e2f"
 
-# Звичайні (несекретні) налаштування. Модель за замовчуванням — безкоштовна.
-[vars]
-OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-
-# СЕКРЕТИ (НЕ писати тут!) задаються окремо:
+# Модель тут НЕ задаємо — кожен обирає свою в дашборді (Variables):
+#   OPENROUTER_MODEL  — будь-яка модель OpenRouter (напр. openrouter/free)
+#   або LLM_MODEL     — якщо використовуєш свій OpenAI-сумісний провайдер
+# Якщо не задати нічого — код використає аварійний фолбек "openrouter/free".
+#
+# СЕКРЕТИ (задаються в дашборді як Secret/Encrypted, НЕ тут):
 #   TELEGRAM_TOKEN     — токен від @BotFather
 #   OPENROUTER_API_KEY — ключ OpenRouter (або LLM_API_KEY для свого провайдера)
 # Через CLI:  wrangler secret put TELEGRAM_TOKEN
-# Або в дашборді: Workers → твій воркер → Settings → Variables and Secrets.
