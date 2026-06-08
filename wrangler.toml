@@ -15,7 +15,7 @@ database_id = "b3327f4f-39b7-476a-9581-e452bce88e2f"
 
 # Звичайні (несекретні) налаштування. Модель за замовчуванням — безкоштовна.
 [vars]
-OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 
 # СЕКРЕТИ (НЕ писати тут!) задаються окремо:
 #   TELEGRAM_TOKEN     — токен від @BotFather
