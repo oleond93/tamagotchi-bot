@@ -12,10 +12,20 @@ import { randomEvent, findEvent } from "./events.js";
 import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
 import { GUIDE_PAGES } from "./guide.js";
 
+// Безпечно читає зсув часового поясу з env. Відсутнє, порожнє чи нечислове
+// значення → дефолт +3 (Київ). Без цього нечисловий рядок давав би NaN, що
+// ламало б і визначення пори доби (нічну паузу), і денний стрік.
+function tzOffset(env) {
+  const raw = env.TZ_OFFSET_HOURS;
+  if (raw == null || String(raw).trim() === "") return 3;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 3;
+}
+
 // Пора доби з урахуванням TZ (типово Київ, +3). Кожен deployer може змінити
 // змінною TZ_OFFSET_HOURS у дашборді.
 function dpart(env) {
-  return dayPart(Number(env.TZ_OFFSET_HOURS ?? 3));
+  return dayPart(tzOffset(env));
 }
 
 // Кулдаун між подіями (год). Після події кнопка «Подія» тимчасово «відпочиває».
@@ -24,7 +34,7 @@ const EVENT_COOLDOWN_H = 2;
 // Оновлює денний стрік і ловить «повернення» після тривалої відсутності.
 // Викликати на кожну активність користувача (не з cron!).
 function registerActivity(pet, env) {
-  const tz = Number(env.TZ_OFFSET_HOURS ?? 3);
+  const tz = tzOffset(env);
   const today = Math.floor((Date.now() / 1000 + tz * 3600) / 86400);
   if (!pet.last_active_day) {
     pet.streak = 1;
@@ -557,7 +567,7 @@ async function setupWebhook(env, origin) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    setTzOffset(env.TZ_OFFSET_HOURS ?? 3);
+    setTzOffset(tzOffset(env));
     if (env.DB) await ensureSchema(env);
 
     // Обробка оновлення від Телеграму (шлях містить токен — це й є секрет).
@@ -605,7 +615,7 @@ export default {
 
   // Cron: раз на годину — занепад + проактивні нагадування.
   async scheduled(event, env, ctx) {
-    setTzOffset(env.TZ_OFFSET_HOURS ?? 3);
+    setTzOffset(tzOffset(env));
     ctx.waitUntil(tick(env));
   },
 };

@@ -679,13 +679,16 @@ export class Pet {
 
 // Пора доби з урахуванням зсуву часового поясу (TZ_OFFSET_HOURS, типово Київ +3).
 export function dayPart(offsetHours = 0) {
-  const h = new Date(Date.now() + offsetHours * 3600 * 1000).getUTCHours();
-  if (h < 6)
+  const off = Number.isFinite(offsetHours) ? offsetHours : 0;
+  const h = new Date(Date.now() + off * 3600 * 1000).getUTCHours();
+  // «Ніч» збігається з проміжком нічного сповільнення занепаду (NIGHT_START..NIGHT_END),
+  // тобто 22:00–07:59 — щоб «не турбувати вночі» (cron) відповідало часу сну.
+  if (h >= NIGHT_START || h < NIGHT_END)
     return {
       key: "night",
       emoji: "🌙",
       label: "ніч",
-      note: "Зараз глибока ніч — ти сонний, позіхаєш, говориш мляво й трохи бурчиш, що тебе потурбували.",
+      note: "Зараз ніч — ти сонний, позіхаєш, говориш мляво й трохи бурчиш, що тебе потурбували.",
     };
   if (h < 12)
     return {
