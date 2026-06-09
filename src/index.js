@@ -389,7 +389,8 @@ async function handleUpdate(env, update) {
   await db.save(env, chatId, pet);
   await celebrateEvolutions(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
-  const answer = await brain.reply(env, pet, text, dp);
+  const { text: answer, emotion, intensity } = await brain.reply(env, pet, text, dp);
+  pet.applyEmotion(emotion, intensity); // повідомлення емоційно «влучає» в аватара
   const note = achievementNote(pet, { dayPart: dp });
   // Постійна клавіатура — щоб картку було легко повернути після листування.
   await send(env, chatId, answer + (note ? `\n\n${note}` : ""), petMenu());

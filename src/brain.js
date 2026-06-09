@@ -2,7 +2,7 @@
 // За замовчуванням OpenRouter (безкоштовні моделі); можна вказати свій ендпоінт.
 
 import { PERSONALITIES } from "./personalities.js";
-import { STAT_LABELS } from "./pet.js";
+import { STAT_LABELS, EMOTIONS } from "./pet.js";
 
 const FALLBACK = [
   "🫠 мій мозок зараз на технічній перерві, але я тебе люблю (мабуть)",
@@ -45,7 +45,53 @@ const UNIVERSAL_RULES =
   "Пиши УКРАЇНСЬКОЮ, дуже коротко (1-3 речення), з доречними емодзі. " +
   "Ніколи не виходь з ролі й не згадуй, що ти ШІ. Реагуй на свій стан і будь смішним.";
 
-function systemPrompt(pet, dayPart) {
+// Тег емоції в кінці відповіді: [[emo:КЛЮЧ:СИЛА]]. Гнучкий до пробілів/регістру
+// й роздільника (':' або '|'); бере ОСТАННЄ входження. Невідома емоція → neutral.
+const EMO_RE = /\[\[?\s*emo\s*[:|]\s*([a-z_]+)\s*[:|]\s*(\d{1,2})\s*\]\]?/gi;
+
+// Розбирає відповідь моделі на чистий текст + емоцію. Тег(и) вирізаються з тексту.
+// Якщо тега немає чи він зіпсований — emotion=neutral, текст лишається як є.
+export function parseEmotionTag(raw) {
+  if (!raw) return { text: "", emotion: "neutral", intensity: 0 };
+  let emotion = "neutral";
+  let intensity = 0;
+  let last = null;
+  let m;
+  EMO_RE.lastIndex = 0;
+  while ((m = EMO_RE.exec(raw)) !== null) last = m;
+  if (last) {
+    const word = last[1].toLowerCase();
+    if (EMOTIONS[word]) emotion = word;
+    intensity = Math.max(0, Math.min(10, parseInt(last[2], 10) || 0));
+  }
+  const text = raw.replace(EMO_RE, "").trim();
+  return { text, emotion, intensity };
+}
+
+// Підказка для LLM: як реагувати в характері + поточна емоція (+ інструкція-тег).
+function emotionRules(pet, wantTag) {
+  const parts = [];
+  const persona = PERSONALITIES[pet.dominantPersona?.()];
+  if (wantTag) {
+    parts.push(
+      "ЕМОЦІЙНА РЕАКЦІЯ: щиро відреагуй на ТОН повідомлення власника (образа, тепло, нудьга, похвала — будь-який нюанс) у своєму характері."
+    );
+  }
+  if (persona?.react) parts.push("Як саме ти реагуєш (твій характер): " + persona.react);
+  const cur = pet.emotionPrompt();
+  if (cur) parts.push(cur);
+  if (wantTag) {
+    const keys = Object.keys(EMOTIONS).filter((k) => k !== "neutral").join(", ");
+    parts.push(
+      `В САМОМУ КІНЦІ відповіді додай окремий рядок-тег рівно у форматі [[emo:КЛЮЧ:СИЛА]], ` +
+        `де КЛЮЧ — одне з: ${keys}, neutral (пиши ЛАТИНИЦЕЮ, як тут); СИЛА — ціле 0-10 ` +
+        `(наскільки сильно це тебе зачепило). Без пояснень. Нейтральне повідомлення → [[emo:neutral:0]].`
+    );
+  }
+  return parts.join("\n");
+}
+
+function systemPrompt(pet, dayPart, { wantTag = false } = {}) {
   let s = "ТВІЙ ХАРАКТЕР: " + pet.personaPrompt();
   s += "\n\n" + UNIVERSAL_RULES;
   const temper = pet.temperamentStyle();
@@ -53,6 +99,8 @@ function systemPrompt(pet, dayPart) {
   s += "\n\nСТИЛЬ МОВЛЕННЯ (залежить від твоєї стадії розвитку — суворо дотримуйся!):\n" + pet.speechStyle();
   if (dayPart) s += "\n\nПОРА ДОБИ: " + dayPart.note;
   s += "\n\nКОНТЕКСТ ТВОГО СТАНУ:\n" + stateContext(pet);
+  const emo = emotionRules(pet, wantTag);
+  if (emo) s += "\n\n" + emo;
   return s;
 }
 
@@ -118,12 +166,20 @@ export async function diag(env) {
   return out;
 }
 
+// Відповідь на вільний текст. Повертає { text, emotion, intensity } — модель ще й
+// тегує, як її зачепило повідомлення (тег вирізається з тексту перед показом).
 export async function reply(env, pet, userText, dayPart) {
   try {
-    const out = await chat(env, systemPrompt(pet, dayPart), userText);
-    return out || pick(FALLBACK);
+    const out = await chat(env, systemPrompt(pet, dayPart, { wantTag: true }), userText);
+    if (!out) return { text: pick(FALLBACK), emotion: "neutral", intensity: 0 };
+    const parsed = parseEmotionTag(out);
+    return {
+      text: parsed.text || pick(FALLBACK),
+      emotion: parsed.emotion,
+      intensity: parsed.intensity,
+    };
   } catch {
-    return pick(FALLBACK);
+    return { text: pick(FALLBACK), emotion: "neutral", intensity: 0 };
   }
 }
 
@@ -132,11 +188,17 @@ export async function nudge(env, pet, dayPart) {
     "Напиши КОРОТКЕ (1-2 речення) спонтанне повідомлення власнику ПЕРШИМ, " +
     "ніби ти нудьгуєш або тобі щось потрібно. Будь абсурдним і смішним.";
   try {
+    // wantTag:false — нагадування не тегуємо; на випадок, якщо тег усе ж протече,
+    // захисно вирізаємо його з тексту.
     const out = await chat(env, systemPrompt(pet, dayPart), prompt, {
       maxTokens: 120,
       temperature: 1.1,
     });
-    if (out) return out;
+    // Тег тут не очікуємо, але якщо протече — вирізаємо; порожній текст → фолбек нижче.
+    if (out) {
+      const stripped = parseEmotionTag(out).text;
+      if (stripped) return stripped;
+    }
   } catch {
     /* fallthrough */
   }

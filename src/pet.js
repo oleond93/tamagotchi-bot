@@ -75,6 +75,48 @@ const ACTION_AFFINITY = {
   meditate: { philosopher: 1 },
 };
 
+// --- Емоційні реакції на повідомлення користувача ----------------------------
+// Окремий ТИМЧАСОВИЙ шар поверх показників: аватар «відчуває» тон того, що йому
+// пишуть. Емоцію визначає LLM (тег у відповіді), а механіку — цей каталог.
+// valence: +1 позитивна / -1 негативна / 0 нейтральна (no-op).
+// effects — дельти показників ПРИ СИЛІ 10 (далі масштабуються силою й вдачею).
+// bubble — репліка для картки, коли емоція активна.
+export const EMOTIONS = {
+  joy:     { label: "радість",    emoji: "😄", valence: 1,  effects: { mood: 6, energy: 3 },            bubble: "😄 «Я такий щасливий!»" },
+  love:    { label: "розчулення", emoji: "🥰", valence: 1,  effects: { mood: 6, social: 5, sanity: 3 }, bubble: "🥰 «Ти найкращий...»" },
+  hurt:    { label: "образа",     emoji: "😔", valence: -1, effects: { mood: -6, social: -5 },          bubble: "😔 «Мені прикро від твоїх слів...»" },
+  anger:   { label: "злість",     emoji: "😠", valence: -1, effects: { mood: -6, sanity: -5 },          bubble: "😠 «Я досі серджусь.»" },
+  sadness: { label: "сум",        emoji: "😢", valence: -1, effects: { mood: -6, energy: -4 },          bubble: "😢 «Щось мені сумно...»" },
+  fear:    { label: "тривога",    emoji: "😨", valence: -1, effects: { sanity: -6, mood: -4 },          bubble: "😨 «Мені трохи лячно...»" },
+  boredom: { label: "нудьга",     emoji: "🥱", valence: -1, effects: { mood: -4 },                      bubble: "🥱 «Нуу-удно з тобою...»" },
+  neutral: { label: "спокій",     emoji: "🙂", valence: 0,  effects: {},                                bubble: null },
+};
+
+// Сила реакції за вдачею: множник для негативних / позитивних емоцій.
+// Дике спалахує від образи й важко тане від ласки; янгол — навпаки.
+const TEMPERAMENT_REACT = {
+  wild:     { neg: 1.4, pos: 0.75 },
+  feisty:   { neg: 1.2, pos: 0.9 },
+  balanced: { neg: 1.0, pos: 1.0 },
+  gentle:   { neg: 0.8, pos: 1.15 },
+  angelic:  { neg: 0.6, pos: 1.3 },
+};
+
+// Як емоції ліплять характер (дрейф архетипів у формувальний період).
+const EMOTION_AFFINITY = {
+  anger:   { rebel: 1, gremlin: 1 },
+  hurt:    { drama: 1 },
+  love:    { sunshine: 1 },
+  joy:     { sunshine: 1 },
+  sadness: { drama: 1 },
+  boredom: { sleepy: 1 },
+  fear:    {},
+};
+
+const EMOTION_HALFLIFE_H = 0.42; // ~25 хв до зменшення інтенсивності вдвічі
+const EMOTION_MIN = 1.0; //         нижче цього — емоція згасає до neutral
+const EMOTION_DELTA_CAP = 8; //     макс |зміна| показника за одне повідомлення
+
 // Поріг середнього тепла → вдача. Спільне для фіналу (computeTemperament)
 // та для «передчуття» по ходу (eggTemperamentTrajectory).
 function temperamentFromWarmth(avg) {
@@ -201,6 +243,10 @@ export class Pet {
     this.last_active_day = d.last_active_day ?? 0; // день останньої активності
     this.flags = d.flags ?? {}; //                разові «моменти»: maxed/red/froze/cult/...
     this.menu_set = d.menu_set ?? false; //       чи вже надсилали постійну клавіатуру
+    // Тимчасова емоція від спілкування (окремо від показників). Згасає з часом.
+    this.emotion = d.emotion ?? null; //          ключ зі EMOTIONS або null (= спокій)
+    this.emotion_intensity = d.emotion_intensity ?? 0; // 0..10
+    this.emotion_at = d.emotion_at ?? 0; //       час встановлення (для згасання)
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -384,6 +430,7 @@ export class Pet {
   }
 
   applyDecay() {
+    this.applyEmotionDecay(); // емоція згасає незалежно від «живий/мертвий»
     if (!this.alive) return;
     let elapsedH = (now() - this.last_update) / 3600;
     if (elapsedH > 0) {
@@ -435,6 +482,57 @@ export class Pet {
     this.nudgePersona(ACTION_AFFINITY[action]); // дія ліпить характер
   }
 
+  // --- Емоційний стан ------------------------------------------------------
+  // Згасання поточної емоції (інтенсивність халвиться раз на EMOTION_HALFLIFE_H).
+  // Нижче порогу EMOTION_MIN — емоція повертається до спокою (neutral/null).
+  applyEmotionDecay() {
+    if (!this.emotion || this.emotion === "neutral") return;
+    const h = (now() - (this.emotion_at || 0)) / 3600;
+    if (h <= 0) return;
+    this.emotion_intensity *= Math.pow(0.5, h / EMOTION_HALFLIFE_H);
+    this.emotion_at = now();
+    if (this.emotion_intensity < EMOTION_MIN) {
+      this.emotion = null;
+      this.emotion_intensity = 0;
+    }
+  }
+
+  // Застосовує емоцію (від LLM-тега) до стану. Сила реакції модулюється вдачею;
+  // інтенсивні емоції ще й легенько рухають активні показники (з кепом). Дрейф
+  // характеру — у формувальний період. No-op для яйця та нейтральної емоції.
+  applyEmotion(emotion, intensity) {
+    if (!this.alive || this.isEgg()) return; // мертвий/яйце — емоцій не має
+    const def = EMOTIONS[emotion];
+    if (!def || emotion === "neutral" || !(intensity > 0)) return;
+    const inten = Math.max(0, Math.min(10, intensity));
+    const t = TEMPERAMENT_REACT[this.temperament] || TEMPERAMENT_REACT.balanced;
+    const mult = def.valence >= 0 ? t.pos : t.neg;
+    const scaled = (inten / 10) * mult;
+    // Дельти лише на активні показники стадії (з кепом і clamp 0..100).
+    const act = new Set(this.activeStats());
+    for (const [stat, base] of Object.entries(def.effects)) {
+      if (!act.has(stat)) continue;
+      const d = Math.max(-EMOTION_DELTA_CAP, Math.min(EMOTION_DELTA_CAP, base * scaled));
+      this[stat] = clamp(this[stat] + d);
+    }
+    this.emotion = emotion;
+    this.emotion_intensity = Math.max(0, Math.min(10, inten * mult));
+    this.emotion_at = now();
+    this.nudgePersona(EMOTION_AFFINITY[emotion]); // емоція ліпить характер
+  }
+
+  // Рядок поточної емоції для системного промпту LLM (або "" коли спокій).
+  emotionPrompt() {
+    if (!this.alive || !this.emotion || this.emotion === "neutral" || this.emotion_intensity < EMOTION_MIN) {
+      return "";
+    }
+    const e = EMOTIONS[this.emotion];
+    if (!e) return "";
+    const strength =
+      this.emotion_intensity >= 6 ? "сильно" : this.emotion_intensity >= 3 ? "помітно" : "трохи";
+    return `ТВІЙ ПОТОЧНИЙ ЕМОЦІЙНИЙ СТАН: ти ${strength} відчуваєш «${e.label}» ${e.emoji}. Нехай це звучить у відповіді, поки не мине.`;
+  }
+
   // Застосувати ефекти міні-події (довільний об'єкт stat:delta).
   applyEffects(effects) {
     this.applyDecay();
@@ -476,6 +574,11 @@ export class Pet {
   // ctx.dayPart — об'єкт пори доби (необов'язково).
   reactionBubble(ctx = {}) {
     if (!this.alive) return "💀 «...»";
+    // Активна емоція від спілкування «перебиває» звичайну реакцію на потреби.
+    if (this.emotion && this.emotion !== "neutral" && this.emotion_intensity >= 4) {
+      const e = EMOTIONS[this.emotion];
+      if (e?.bubble) return e.bubble;
+    }
     // Уночі — сонний, якщо немає чогось критичного.
     if (ctx.dayPart?.key === "night" && !this.worstNeed()) {
       return "😴 «Хр-р-р... я ж сплю...»";
@@ -673,6 +776,9 @@ export class Pet {
       last_active_day: this.last_active_day,
       flags: this.flags,
       menu_set: this.menu_set,
+      emotion: this.emotion,
+      emotion_intensity: this.emotion_intensity,
+      emotion_at: this.emotion_at,
     };
   }
 }
