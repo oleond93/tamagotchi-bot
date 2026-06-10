@@ -88,6 +88,11 @@ flowchart TD
   STATS --> LLM
   A2 --> LLM
 
+  A2 -->|"репліки → вікно"| MEM[("🧠 Пам'ять<br/>діалог + факти про власника")]:::state
+  STAGE -->|"лише після 🐣"| MEM
+  MEM -->|"історія + згадування"| LLM
+  LLM -->|"тег [[mem:факт]]"| MEM
+
   A1 --> STREAK[📅 Денний стрік]:::sys
   A2 --> STREAK
   A1 --> COUNT[🔢 Лічильники]:::sys
@@ -104,6 +109,7 @@ flowchart TD
   CRON([⏰ Cron щогодини]):::sys --> NUDGE[🔔 Нагадування саме]:::out
   STATS --> NUDGE
   DAY -->|"ніч = тиша"| NUDGE
+  MEM -->|"може згадати факт"| NUDGE
 </div>
 
 <h2>📊 Показники (стани) і занепад</h2>
@@ -195,9 +201,31 @@ flowchart TD
   <span class="pill">🧬 Вдача (5)</span> +
   <span class="pill">🗣️ Стиль за стадією</span> +
   <span class="pill">🌗 Пора доби</span> +
-  <span class="pill">📊 Поточний стан</span>
+  <span class="pill">📊 Поточний стан</span> +
+  <span class="pill">🧠 Пам'ять (факти + діалог)</span>
   <p class="legend">🗣️ Стиль за стадією: яйце — лише звуки; немовля — агу/слова; дитина — цікава; підліток — зухвалий; дорослий — красномовний; космос — загадковий. Усе перемножується → кожен улюбленець звучить унікально.</p>
 </div>
+
+<h2>🧠 Пам'ять (натхнення — Hermes Agent)</h2>
+<div class="grid">
+  <div class="card">
+    <h3>💬 Короткострокова — діалог</h3>
+    <p class="legend">Останні репліки розмови передаються в LLM як справжня історія чату — аватар «памʼятає», про що ви щойно говорили. Вікно — <code>останні 12 реплік</code> (≈6 туди-сюди), найстаріші витісняються. Працює лише після вилуплення (яйце діалог не веде).</p>
+  </div>
+  <div class="card">
+    <h3>🗂️ Довгострокова — факти про власника</h3>
+    <p class="legend">LLM сам тегує вартісне у кінці відповіді: <code>[[mem:короткий факт]]</code> (імʼя, уподобання, події, близькі, плани). Факт зберігається у пет (поле <code>memories</code>) і доречно згадується в чаті та в нагадуваннях.</p>
+    <table style="margin-top:10px">
+      <tr><th>Параметр</th><th>Значення</th></tr>
+      <tr><td>Максимум фактів</td><td><code>30</code> (понад — витісняється найстаріший)</td></tr>
+      <tr><td>У промпт</td><td><code>12</code> найсвіжіших</td></tr>
+      <tr><td>Дедуп</td><td>повтор/підрядок → підкріплення наявного</td></tr>
+      <tr><td>Захоплення</td><td>лише живий і не-яйце</td></tr>
+      <tr><td>Перегляд</td><td><code>/memory</code> · кнопка «🧠 Пам'ять»</td></tr>
+    </table>
+  </div>
+</div>
+<div class="legend">Усе живе в тому ж JSON-блобі <code>data</code> (без нових таблиць). <b>Нуль зайвих викликів API</b>: захоплення — тим самим тегом, що й емоції; забування/дедуп — суто кодом.</div>
 
 <h2>🎲 Події</h2>
 <div class="card">
@@ -262,6 +290,7 @@ flowchart TD
   <span class="pill">chat_count</span><span class="pill">counts (дії/події)</span><span class="pill">deaths</span>
   <span class="pill">🚩 flags (maxed/red/froze/cult/heartbreak/prodigal)</span><span class="pill">досягнення</span>
   <span class="pill">last_seen / last_event / last_nudge</span><span class="pill">egg_warm_sum/egg_hours</span>
+  <span class="pill">🧠 dialog (вікно)</span><span class="pill">🧠 memories (факти)</span><span class="pill">emotion + intensity</span>
 </div>
 
 <div class="note">Усі числа (швидкості занепаду, ефекти дій, пороги стадій/вдачі, таймери) — прості константи у <code>pet.js</code> / <code>index.js</code>. Скажи, що змінити — підкрутимо за секунди.</div>

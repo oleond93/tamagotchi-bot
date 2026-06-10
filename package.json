@@ -7,7 +7,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute tamagotchi --remote --file=./schema.sql",
-    "test": "node test/emotion.test.mjs"
+    "test": "node test/emotion.test.mjs && node test/memory.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^3.95.0"

@@ -48,23 +48,39 @@ const UNIVERSAL_RULES =
 // Тег емоції в кінці відповіді: [[emo:КЛЮЧ:СИЛА]]. Гнучкий до пробілів/регістру
 // й роздільника (':' або '|'); бере ОСТАННЄ входження. Невідома емоція → neutral.
 const EMO_RE = /\[\[?\s*emo\s*[:|]\s*([a-z_]+)\s*[:|]\s*(\d{1,2})\s*\]\]?/gi;
+// Тег памʼяті: [[mem:короткий факт про власника]]. Факт — будь-який текст до ']'.
+// Так само гнучкий до пробілів/регістру/роздільника; береться ОСТАННЄ входження.
+const MEM_RE = /\[\[?\s*mem\s*[:|]\s*([\s\S]+?)\s*\]\]?/gi;
 
-// Розбирає відповідь моделі на чистий текст + емоцію. Тег(и) вирізаються з тексту.
-// Якщо тега немає чи він зіпсований — emotion=neutral, текст лишається як є.
-export function parseEmotionTag(raw) {
-  if (!raw) return { text: "", emotion: "neutral", intensity: 0 };
-  let emotion = "neutral";
-  let intensity = 0;
+function lastMatch(re, raw) {
   let last = null;
   let m;
-  EMO_RE.lastIndex = 0;
-  while ((m = EMO_RE.exec(raw)) !== null) last = m;
-  if (last) {
-    const word = last[1].toLowerCase();
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) last = m;
+  return last;
+}
+
+// Повний розбір відповіді моделі: чистий текст + емоція + (необовʼязково) факт памʼяті.
+// Вирізає ОБИДВА типи тегів. Відсутній/зіпсований тег → безпечні дефолти (neutral/null).
+export function parseReply(raw) {
+  if (!raw) return { text: "", emotion: "neutral", intensity: 0, memory: null };
+  let emotion = "neutral";
+  let intensity = 0;
+  const emo = lastMatch(EMO_RE, raw);
+  if (emo) {
+    const word = emo[1].toLowerCase();
     if (EMOTIONS[word]) emotion = word;
-    intensity = Math.max(0, Math.min(10, parseInt(last[2], 10) || 0));
+    intensity = Math.max(0, Math.min(10, parseInt(emo[2], 10) || 0));
   }
-  const text = raw.replace(EMO_RE, "").trim();
+  const mem = lastMatch(MEM_RE, raw);
+  const memory = mem ? mem[1].trim() || null : null;
+  const text = raw.replace(EMO_RE, "").replace(MEM_RE, "").trim();
+  return { text, emotion, intensity, memory };
+}
+
+// Зворотна сумісність: вузький розбір емоції (також вирізає протеклий mem-тег).
+export function parseEmotionTag(raw) {
+  const { text, emotion, intensity } = parseReply(raw);
   return { text, emotion, intensity };
 }
 
@@ -91,6 +107,18 @@ function emotionRules(pet, wantTag) {
   return parts.join("\n");
 }
 
+// Інструкція-тег для захоплення довгострокового факту про власника (лише в reply,
+// лише для не-яйця/живого). Дзеркалить логіку емоційного тега.
+function memoryCaptureRule(pet) {
+  if (pet.isEgg() || !pet.alive) return "";
+  return (
+    "ПАМʼЯТЬ: якщо з повідомлення ти дізнався щось ВАРТЕ ЗАПАМʼЯТАТИ НАДОВГО про власника " +
+    "(імʼя, уподобання, важливі події, близькі люди чи тварини, плани) — окремим рядком у кінці додай " +
+    "тег [[mem:короткий факт про власника українською]] (одне коротке речення, про ВЛАСНИКА, не про себе). " +
+    "Лише справді вартісне; якщо нічого нового — тег НЕ додавай."
+  );
+}
+
 function systemPrompt(pet, dayPart, { wantTag = false } = {}) {
   let s = "ТВІЙ ХАРАКТЕР: " + pet.personaPrompt();
   s += "\n\n" + UNIVERSAL_RULES;
@@ -99,12 +127,20 @@ function systemPrompt(pet, dayPart, { wantTag = false } = {}) {
   s += "\n\nСТИЛЬ МОВЛЕННЯ (залежить від твоєї стадії розвитку — суворо дотримуйся!):\n" + pet.speechStyle();
   if (dayPart) s += "\n\nПОРА ДОБИ: " + dayPart.note;
   s += "\n\nКОНТЕКСТ ТВОГО СТАНУ:\n" + stateContext(pet);
+  const mem = pet.memoryPrompt(); // що памʼятаємо про власника (згадування)
+  if (mem) s += "\n\n" + mem;
   const emo = emotionRules(pet, wantTag);
   if (emo) s += "\n\n" + emo;
+  if (wantTag) {
+    const memRule = memoryCaptureRule(pet); // як запамʼятати нове (захоплення)
+    if (memRule) s += "\n\n" + memRule;
+  }
   return s;
 }
 
-async function chat(env, system, user, { maxTokens = 200, temperature = 1.0 } = {}) {
+// history — попередні репліки діалогу ([{role, content}]), вставляються між
+// системним промптом і поточним повідомленням (короткострокова памʼять).
+async function chat(env, system, user, { maxTokens = 200, temperature = 1.0, history = [] } = {}) {
   const { baseUrl, apiKey, model } = config(env);
   if (!apiKey) return null;
   const resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -117,6 +153,7 @@ async function chat(env, system, user, { maxTokens = 200, temperature = 1.0 } = 
       model,
       messages: [
         { role: "system", content: system },
+        ...history,
         { role: "user", content: user },
       ],
       max_tokens: maxTokens,
@@ -166,37 +203,42 @@ export async function diag(env) {
   return out;
 }
 
-// Відповідь на вільний текст. Повертає { text, emotion, intensity } — модель ще й
-// тегує, як її зачепило повідомлення (тег вирізається з тексту перед показом).
+// Відповідь на вільний текст. Повертає { text, emotion, intensity, memory } — модель
+// тегує, як її зачепило повідомлення ([[emo:…]]) і, за потреби, новий факт про власника
+// ([[mem:…]]). Теги вирізаються з тексту перед показом. У промпт додається історія діалогу.
 export async function reply(env, pet, userText, dayPart) {
   try {
-    const out = await chat(env, systemPrompt(pet, dayPart, { wantTag: true }), userText);
-    if (!out) return { text: pick(FALLBACK), emotion: "neutral", intensity: 0 };
-    const parsed = parseEmotionTag(out);
+    const out = await chat(env, systemPrompt(pet, dayPart, { wantTag: true }), userText, {
+      history: pet.dialogMessages(),
+    });
+    if (!out) return { text: pick(FALLBACK), emotion: "neutral", intensity: 0, memory: null };
+    const parsed = parseReply(out);
     return {
       text: parsed.text || pick(FALLBACK),
       emotion: parsed.emotion,
       intensity: parsed.intensity,
+      memory: parsed.memory,
     };
   } catch {
-    return { text: pick(FALLBACK), emotion: "neutral", intensity: 0 };
+    return { text: pick(FALLBACK), emotion: "neutral", intensity: 0, memory: null };
   }
 }
 
 export async function nudge(env, pet, dayPart) {
   const prompt =
     "Напиши КОРОТКЕ (1-2 речення) спонтанне повідомлення власнику ПЕРШИМ, " +
-    "ніби ти нудьгуєш або тобі щось потрібно. Будь абсурдним і смішним.";
+    "ніби ти нудьгуєш або тобі щось потрібно. Будь абсурдним і смішним. " +
+    "Якщо доречно — можеш мимохідь згадати щось із того, що памʼятаєш про власника.";
   try {
     // wantTag:false — нагадування не тегуємо; на випадок, якщо тег усе ж протече,
-    // захисно вирізаємо його з тексту.
+    // захисно вирізаємо його з тексту (обидва типи).
     const out = await chat(env, systemPrompt(pet, dayPart), prompt, {
       maxTokens: 120,
       temperature: 1.1,
     });
     // Тег тут не очікуємо, але якщо протече — вирізаємо; порожній текст → фолбек нижче.
     if (out) {
-      const stripped = parseEmotionTag(out).text;
+      const stripped = parseReply(out).text;
       if (stripped) return stripped;
     }
   } catch {

@@ -145,10 +145,12 @@ function mainKeyboard(pet) {
     { text: "🎲 Подія", callback_data: "evt" },
     { text: "🌱 Ріст", callback_data: "grow" },
   ]);
-  rows.push([
+  const infoRow = [
     { text: "🏆 Досягнення", callback_data: "ach" },
     { text: "📖 Гайд", callback_data: "guide" },
-  ]);
+  ];
+  if (!pet.isEgg()) infoRow.push({ text: "🧠 Памʼять", callback_data: "mem" });
+  rows.push(infoRow);
   rows.push([{ text: "🔄 Оновити", callback_data: "status" }]);
   return { inline_keyboard: rows };
 }
@@ -232,6 +234,7 @@ const HELP =
   "🌱 кнопка «Ріст» — що відкриється далі\n" +
   "🏆 кнопка «Досягнення» · 🎲 «Подія»\n" +
   "🎭 /personality — мій характер (призначається випадково при вилупленні)\n" +
+  "🧠 /memory — що я про тебе запам'ятав (я слухаю, коли ти пишеш!)\n" +
   "✏️ /name &lt;ім'я&gt; · 💀 /revive\n\n" +
   "💡 Найзручніше — кнопками під карткою (/status). Якщо вона поїхала вгору під час балачки — " +
   "поверни її кнопкою <b>«📊 Картка»</b> біля поля вводу (вона завжди там).\n" +
@@ -322,6 +325,12 @@ async function handleUpdate(env, update) {
     ));
   }
 
+  if (cmd === "/memory") {
+    const pet = await getPet(env, chatId);
+    if (!pet) return void (await send(env, chatId, "Спершу /start 🥚"));
+    return void (await send(env, chatId, pet.memoryCard(), mainKeyboard(pet)));
+  }
+
   if (cmd === "/revive") {
     const pet = await db.load(env, chatId);
     if (!pet) return void (await send(env, chatId, "Нема кого воскрешати. /start 🥚"));
@@ -389,8 +398,11 @@ async function handleUpdate(env, update) {
   await db.save(env, chatId, pet);
   await celebrateEvolutions(env, chatId, pet);
   await tg(env, "sendChatAction", { chat_id: chatId, action: "typing" });
-  const { text: answer, emotion, intensity } = await brain.reply(env, pet, text, dp);
+  const { text: answer, emotion, intensity, memory } = await brain.reply(env, pet, text, dp);
   pet.applyEmotion(emotion, intensity); // повідомлення емоційно «влучає» в аватара
+  if (memory) pet.addMemory(memory); // новий факт про власника → довгострокова памʼять
+  pet.rememberDialog("u", text); //     репліки у вікно діалогу — контекст наступних відповідей
+  pet.rememberDialog("a", answer);
   const note = achievementNote(pet, { dayPart: dp });
   // Постійна клавіатура — щоб картку було легко повернути після листування.
   await send(env, chatId, answer + (note ? `\n\n${note}` : ""), petMenu());
@@ -426,6 +438,14 @@ async function handleCallback(env, cq) {
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, "");
     await editCard(env, chatId, messageId, guideText(page), guideKeyboard(page));
+    return;
+  }
+
+  // Памʼять про власника.
+  if (data === "mem") {
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, "");
+    await editCard(env, chatId, messageId, pet.memoryCard(), backKeyboard());
     return;
   }
 
