@@ -189,6 +189,25 @@ const EVOLUTION_STAGES = [
   [30, "Космічна Сутність", "🌌", "переросло цей чат, але лишилось з тобою"],
 ];
 
+// Гілчаста еволюція (натхнення — Digimon): ФІНАЛЬНА форма (index FINAL_INDEX) залежить від
+// вдача × домінантний характер. Часовий кістяк (вік/індекс/активні показники/стиль мовлення)
+// НЕ міняється — гілкується лише ідентичність форми. Див. evolutionPath / _stageIdentity.
+const FINAL_INDEX = EVOLUTION_STAGES.length - 1;
+const FORMS = {
+  demon:       { emoji: "👹", name: "Хаос-Демон", desc: "сіє безлад і регоче з нього" },
+  imp:         { emoji: "🃏", name: "Дух-Бешкетник", desc: "капостить, але по-доброму" },
+  outlaw:      { emoji: "🦹", name: "Відступник", desc: "сам собі закон" },
+  free:        { emoji: "🦸", name: "Вільний Дух", desc: "нескорений, але з добрим серцем" },
+  angel:       { emoji: "🌟", name: "Світлий Янгол", desc: "випромінює тепло й спокій" },
+  sun:         { emoji: "☀️", name: "Сонцесяйний", desc: "зігріває всіх навколо" },
+  enlightened: { emoji: "🧘", name: "Просвітлений", desc: "осягнув суть буття" },
+  void:        { emoji: "🌌", name: "Космічний Розум", desc: "мислить цілими галактиками" },
+  star:        { emoji: "🌠", name: "Наднова-Зірка", desc: "сяє так, що не відвести очей" },
+  machine:     { emoji: "🛸", name: "Розумна Машина", desc: "обчислила сенс усього сущого" },
+  dream:       { emoji: "💤", name: "Сон-Сутність", desc: "живе десь між сном і явою" },
+  cosmic:      { emoji: "🌌", name: "Космічна Сутність", desc: "переросла цей чат, але лишилась з тобою" },
+};
+
 export function now() {
   return Date.now() / 1000;
 }
@@ -466,7 +485,10 @@ export class Pet {
   celebrationFor(idx) {
     const st = EVOLUTION_STAGES[idx];
     if (!st) return "";
-    const [, sname, semoji, desc] = st;
+    const id = this._stageIdentity(idx); // фінальна форма — гілчаста назва/емодзі/опис
+    const sname = id.name;
+    const semoji = id.emoji;
+    const desc = id.desc;
     const prev = new Set(idx > 0 ? STAGE_STATS[idx - 1] : []);
     const unlocked = (STAGE_STATS[idx] || [])
       .filter((s) => !prev.has(s))
@@ -485,6 +507,16 @@ export class Pet {
         persLine
       );
     }
+    // Фінальна форма — гілчаста кульмінація: оголошуємо вид і що його сформувало.
+    if (idx === FINAL_INDEX) {
+      return (
+        "🌌✨ <b>ФІНАЛЬНА ЕВОЛЮЦІЯ!</b> ✨🌌\n\n" +
+        `${semoji} <b>${this.name}</b> досяг(ла) фінальної форми:\n` +
+        `<b>${semoji} ${sname}</b> — <i>${desc}</i>${unlockedTxt}\n\n` +
+        `Саме твій догляд привів сюди:\n🧬 ${this.temperamentLabel()}  ·  🎭 ${this.personalityLabel()}\n` +
+        "<i>Інші вдача чи характер дали б зовсім іншу форму 😉</i>"
+      );
+    }
     // На стадії 😈 характер остаточно формується.
     const persLock =
       idx === 3 && this.personalityLabel()
@@ -499,6 +531,40 @@ export class Pet {
 
   isEgg() {
     return this.evolutionInfo().index === 0;
+  }
+
+  // Ключ ФІНАЛЬНОЇ форми за вдачею × домінантним характером (натхнення — Digimon).
+  // null, якщо характеру ще немає (яйце). Див. FORMS / _stageIdentity / celebrationFor.
+  evolutionPath() {
+    const p = this.dominantPersona();
+    if (!p || !PERSONALITIES[p]) return null;
+    const t = this.temperament;
+    const light = t === "angelic" || t === "gentle";
+    const dark = t === "wild" || t === "feisty";
+    switch (p) {
+      case "gremlin": return dark ? "demon" : "imp";
+      case "rebel": return dark ? "outlaw" : "free";
+      case "sunshine": return light ? "angel" : "sun";
+      case "philosopher": return light ? "enlightened" : "void";
+      case "drama": return "star";
+      case "nerd": return "machine";
+      case "sleepy": return "dream";
+      default: return "cosmic";
+    }
+  }
+
+  // Ідентичність стадії {name, emoji, desc}: фінальна форма гілкується за evolutionPath;
+  // решта — канонічні EVOLUTION_STAGES. Для не-фінальних індексів шлях НЕ обчислюється.
+  _stageIdentity(index) {
+    const st = EVOLUTION_STAGES[index];
+    const base = st
+      ? { name: st[1], emoji: st[2], desc: st[3] }
+      : { name: "", emoji: "", desc: "" };
+    if (index === FINAL_INDEX) {
+      const path = this.evolutionPath();
+      if (path && FORMS[path]) return { ...FORMS[path] };
+    }
+    return base;
   }
 
   // Знак вилуплення залежно від прогресу (0..1) — змінюється протягом доби.
@@ -527,11 +593,8 @@ export class Pet {
   }
 
   stage() {
-    let result = EVOLUTION_STAGES[0];
-    for (const s of EVOLUTION_STAGES) {
-      if (this.ageDays >= s[0]) result = s;
-    }
-    return { name: result[1], emoji: result[2] };
+    const id = this._stageIdentity(this.evolutionInfo().index);
+    return { name: id.name, emoji: id.emoji };
   }
 
   avg() {
@@ -898,8 +961,8 @@ export class Pet {
     }
     return {
       index: i,
-      current: { name: cur[1], emoji: cur[2], desc: cur[3] },
-      next: next ? { name: next[1], emoji: next[2], desc: next[3] } : null,
+      current: this._stageIdentity(i),
+      next: next ? this._stageIdentity(i + 1) : null,
       progress,
       daysLeft,
     };
@@ -929,7 +992,10 @@ export class Pet {
         .map((s) => STAT_META[s][1]);
     };
     const lines = EVOLUTION_STAGES.map((st, idx) => {
-      const [days, sname, semoji] = st;
+      const days = st[0];
+      const id = this._stageIdentity(idx); // фінальна форма гілкується (тизер шляху)
+      const sname = id.name;
+      const semoji = id.emoji;
       const unlock = newAt(idx);
       const plus = unlock.length ? ` <i>(+${unlock.join("")})</i>` : "";
       if (idx < info.index) return `✅ ${semoji} ${sname}`;
