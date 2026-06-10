@@ -266,6 +266,8 @@ export class Pet {
     // Памʼять: вікно діалогу + куровані факти про власника (див. блок констант вище).
     this.dialog = d.dialog ?? []; //   [{ r:'u'|'a', t }] — останні репліки
     this.memories = d.memories ?? []; // [{ t, at }] — довгострокові факти
+    // Проактивність: коли востаннє відпрацював «ритуал» (день-індекс), напр. {morning, streak}.
+    this.rituals = d.rituals ?? {};
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -645,6 +647,52 @@ export class Pet {
     return `🧠 <b>Що я памʼятаю про тебе</b> <i>(${items.length})</i>\n\n${lines}`;
   }
 
+  // --- Проактивність ("режисер" виходів на звʼязок) ------------------------
+  // Які типи нагадування доречні зараз. Повертає { priority, flavor }:
+  //  priority — без кидка кубика, раз на день (morning/streak);
+  //  flavor   — коли вже є привід вийти (потреба/тиша), обирається випадково в tick.
+  // Чиста функція — уся випадковість лишається в index.js.
+  proactivePlan(dayPart, today) {
+    const priority = [];
+    const flavor = [];
+    if (this.isEgg() || !this.alive) return { priority, flavor };
+    const key = dayPart?.key;
+    const r = this.rituals || {};
+    // Ранкове привітання — лише активним за останні 48 год, раз на день.
+    const recentlyEngaged = now() - (this.last_seen || 0) < 2 * 86400;
+    if (key === "morning" && recentlyEngaged && r.morning !== today) {
+      priority.push("morning");
+    }
+    // Порятунок серії — була серія, активний учора, не сьогодні, день/вечір, раз на день.
+    if (
+      (this.streak || 0) >= 2 &&
+      this.last_active_day === today - 1 &&
+      (key === "day" || key === "evening") &&
+      r.streak !== today
+    ) {
+      priority.push("streak");
+    }
+    // Флейвор: від найвиразнішого до фолбеку.
+    if (this.emotion && this.emotion !== "neutral" && this.emotion_intensity >= 4) {
+      flavor.push("emotion");
+    }
+    if (this.worstNeed() !== null) flavor.push("need");
+    if ((this.memories || []).length) flavor.push("memory");
+    flavor.push("thought"); // завжди можливий фолбек
+    return { priority, flavor };
+  }
+
+  // Шаблон порятунку серії (без LLM). Варіант стабільно залежить від числа серії.
+  streakRescueLine() {
+    const n = this.streak || 0;
+    const lines = [
+      `🔥 Гей! У нас ${n} дн. поспіль — не дай серії згаснути сьогодні 🥺`,
+      `🔥 ${n} дн. поспіль! Зазирни на хвилинку, щоб не обнулити 👀`,
+      `😺 Ще трохи — і серія в ${n} дн. урветься... врятуєш?`,
+    ];
+    return lines[n % lines.length];
+  }
+
   // Застосувати ефекти міні-події (довільний об'єкт stat:delta).
   applyEffects(effects) {
     this.applyDecay();
@@ -893,6 +941,7 @@ export class Pet {
       emotion_at: this.emotion_at,
       dialog: this.dialog,
       memories: this.memories,
+      rituals: this.rituals,
     };
   }
 }

@@ -106,10 +106,11 @@ flowchart TD
   TEMP --> ACH
   AGE --> ACH
 
-  CRON([⏰ Cron щогодини]):::sys --> NUDGE[🔔 Нагадування саме]:::out
+  CRON([⏰ Cron щогодини]):::sys --> NUDGE["🔔 Нагадування<br/>режисер: потреба/памʼять/ритуал/думка"]:::out
   STATS --> NUDGE
-  DAY -->|"ніч = тиша"| NUDGE
+  DAY -->|"ніч=тиша · ранок=привітання"| NUDGE
   MEM -->|"може згадати факт"| NUDGE
+  STREAK -->|"серія під загрозою"| NUDGE
 </div>
 
 <h2>📊 Показники (стани) і занепад</h2>
@@ -274,8 +275,18 @@ flowchart TD
     <p class="legend">Впливає на: занепад (ніч ×0.18), тон LLM, бульбашку-реакцію, і вимикає нічні нагадування.</p>
   </div>
   <div class="card">
-    <h3>🔔 Нагадування (cron)</h3>
-    <p class="legend">Щогодини. Пише саме, якщо є гостра потреба або тиша ≥4 год. Кулдаун 2 год. Уночі мовчить. Яйце нагадує частіше (тиша 4 год, шанс 0.85).</p>
+    <h3>🔔 Нагадування — «режисер» (cron)</h3>
+    <p class="legend">Щогодини, одне повідомлення на тік. Замість плаского нудлу <b>обирає тип виходу</b> за станом. Кулдаун 2 год, уночі мовчить, яйце — окремо (тизери, шанс 0.85).</p>
+    <table style="margin-top:8px">
+      <tr><th>Тип</th><th>Коли</th><th>LLM?</th></tr>
+      <tr><td>🌅 morning</td><td>раз/день уранці, якщо активний &lt;48 год</td><td>так</td></tr>
+      <tr><td>🔥 streak</td><td>раз/день: серія ≥2 під загрозою (був учора, не сьогодні)</td><td>ні (шаблон)</td></tr>
+      <tr><td>😤 emotion</td><td>є привід + сильна емоція (≥4)</td><td>так</td></tr>
+      <tr><td>🍗 need</td><td>є привід + гостра потреба</td><td>так</td></tr>
+      <tr><td>🧠 memory</td><td>є привід + є факти про власника</td><td>так</td></tr>
+      <tr><td>💭 thought</td><td>фолбек (спонтанна думка)</td><td>так</td></tr>
+    </table>
+    <p class="legend">«Привід» = гостра потреба або тиша ≥4 год (+ шанс 0.5). morning/streak — раз/день, без кидка кубика. Серед флейворних tick обирає випадково.</p>
   </div>
   <div class="card">
     <h3>💀 Смерть і воскресіння</h3>
@@ -291,6 +302,7 @@ flowchart TD
   <span class="pill">🚩 flags (maxed/red/froze/cult/heartbreak/prodigal)</span><span class="pill">досягнення</span>
   <span class="pill">last_seen / last_event / last_nudge</span><span class="pill">egg_warm_sum/egg_hours</span>
   <span class="pill">🧠 dialog (вікно)</span><span class="pill">🧠 memories (факти)</span><span class="pill">emotion + intensity</span>
+  <span class="pill">🔔 rituals (morning/streak — раз/день)</span>
 </div>
 
 <div class="note">Усі числа (швидкості занепаду, ефекти дій, пороги стадій/вдачі, таймери) — прості константи у <code>pet.js</code> / <code>index.js</code>. Скажи, що змінити — підкрутимо за секунди.</div>

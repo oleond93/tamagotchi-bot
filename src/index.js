@@ -650,6 +650,8 @@ async function tick(env) {
   const dp = dpart(env);
   // Уночі не турбуємо — люди сплять.
   if (dp.key === "night") return;
+  const tz = tzOffset(env);
+  const today = Math.floor((Date.now() / 1000 + tz * 3600) / 86400); // день-індекс (як у registerActivity)
   const pets = await db.allPets(env);
   for (const { chatId, pet } of pets) {
     pet.applyDecay();
@@ -659,19 +661,48 @@ async function tick(env) {
     if (!pet.alive) continue;
     if (now() - pet.last_nudge < NUDGE_COOLDOWN_H * 3600) continue;
 
-    // Яйце нагадує про себе частіше — щоб людина повернулась за добу очікування.
-    const silenceH = pet.isEgg() ? 4 : SILENT_HOURS_H;
-    const chance = pet.isEgg() ? 0.85 : NUDGE_CHANCE;
-    const needsAttention = pet.worstNeed() !== null;
-    const longSilence = now() - pet.last_seen > silenceH * 3600;
-    if (!(needsAttention || longSilence)) continue;
-    if (Math.random() > chance) continue;
+    // Яйце — окремий простіший шлях: тизери без LLM, нагадує частіше.
+    if (pet.isEgg()) {
+      const needsAttention = pet.worstNeed() !== null;
+      const longSilence = now() - pet.last_seen > 4 * 3600;
+      if (!(needsAttention || longSilence)) continue;
+      if (Math.random() > 0.85) continue;
+      try {
+        await send(env, chatId, randomLine(EGG_TEASERS));
+        pet.last_nudge = now();
+        await db.save(env, chatId, pet);
+      } catch (e) {
+        /* ignore */
+      }
+      continue;
+    }
+
+    // «Режисер» проактивності для тих, хто вже вилупився: обираємо ТИП виходу на звʼязок.
+    // priority (morning/streak) — раз на день, без кидка кубика; flavor — лише коли є привід.
+    const plan = pet.proactivePlan(dp, today);
+    let kind = null;
+    if (plan.priority.length) {
+      kind = plan.priority[0];
+    } else {
+      const needsAttention = pet.worstNeed() !== null;
+      const longSilence = now() - pet.last_seen > SILENT_HOURS_H * 3600;
+      if (!(needsAttention || longSilence)) continue;
+      if (Math.random() > NUDGE_CHANCE) continue;
+      kind = plan.flavor[Math.floor(Math.random() * plan.flavor.length)];
+    }
 
     try {
-      const txt = pet.isEgg() ? randomLine(EGG_TEASERS) : await brain.nudge(env, pet, dp);
-      await send(env, chatId, txt);
-      pet.last_nudge = now();
-      await db.save(env, chatId, pet);
+      const txt =
+        kind === "streak" ? pet.streakRescueLine() : await brain.nudge(env, pet, dp, kind);
+      if (txt) {
+        await send(env, chatId, txt);
+        pet.last_nudge = now();
+        if (kind === "morning" || kind === "streak") {
+          pet.rituals = pet.rituals || {};
+          pet.rituals[kind] = today;
+        }
+        await db.save(env, chatId, pet);
+      }
     } catch (e) {
       /* ignore individual send failures */
     }
