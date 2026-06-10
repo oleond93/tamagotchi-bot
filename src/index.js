@@ -11,6 +11,7 @@ import { checkNew, achievementsCard } from "./achievements.js";
 import { randomEvent, findEvent } from "./events.js";
 import { EGG_LISTEN, EGG_WIGGLE, EGG_TEASERS, randomLine } from "./egg.js";
 import { GUIDE_PAGES } from "./guide.js";
+import { GUIDE_HTML } from "./guide-page.js";
 
 // Безпечно читає зсув часового поясу з env. Відсутнє, порожнє чи нечислове
 // значення → дефолт +3 (Київ). Без цього нечисловий рядок давав би NaN, що
@@ -651,6 +652,13 @@ export default {
         // мовчки ігноруємо некоректні запити
       }
       return new Response("ok");
+    }
+
+    // Повний веб-гайд по грі (лор + усі механіки). Аліас /gide — на випадок одруківки.
+    if (url.pathname === "/guide" || url.pathname === "/gide") {
+      return new Response(GUIDE_HTML, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
     }
 
     // Діагностика AI-провайдера: відкрий /diag у браузері, щоб побачити причину.
