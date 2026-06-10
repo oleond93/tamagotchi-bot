@@ -128,6 +128,12 @@ export const MEMORY_MAX = 30; //        максимум збережених ф
 export const MEMORY_ENTRY_MAX = 160; // обрізання тексту факту
 export const MEMORY_PROMPT_MAX = 12; // скільки найсвіжіших фактів інжектимо в промпт
 
+// «Класові» механіки характеру (див. PERSONALITIES[*].traits).
+const ABILITY_COOLDOWN_H = 8; //   кулдаун фірмової здібності
+const SYNERGY_LIKE = 1.4; //       резонанс: ×множник на основний показник дії
+const SYNERGY_DISLIKE = 0.6; //    бекфайр: ×множник + штраф настрою
+const SYNERGY_MOOD_PENALTY = 5; // штраф настрою при бекфайрі
+
 // Екранування для Telegram parse_mode=HTML (текст факту приходить від LLM).
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -268,6 +274,8 @@ export class Pet {
     this.memories = d.memories ?? []; // [{ t, at }] — довгострокові факти
     // Проактивність: коли востаннє відпрацював «ритуал» (день-індекс), напр. {morning, streak}.
     this.rituals = d.rituals ?? {};
+    // Час останнього використання фірмової здібності (кулдаун).
+    this.last_ability = d.last_ability ?? 0;
   }
 
   // Вдача за середнім теплом, яке яйце мало до вилуплення.
@@ -354,6 +362,87 @@ export class Pet {
       return `Ти — СУМІШ двох характерів, поєднуй риси обох:\n(1) ${a.prompt}\n(2) ${b.prompt}`;
     }
     return (PERSONALITIES[e[0][0]] || PERSONALITIES.gremlin).prompt;
+  }
+
+  // --- «Класові» риси характеру (traits домінантного архетипу) -------------
+  // Риси поточного домінантного архетипу (пасив/синергія/здібність) або {}.
+  _traits() {
+    const p = PERSONALITIES[this.dominantPersona()];
+    return (p && p.traits) || {};
+  }
+
+  // Множник занепаду показника від характеру (default 1.0).
+  _decayMult(stat) {
+    const d = this._traits().decay;
+    return (d && d[stat]) || 1;
+  }
+
+  // Синергія дії з характером: 'like' (резонанс) / 'dislike' (бекфайр) / null.
+  _actionSynergy(action) {
+    const t = this._traits();
+    if (t.likes && t.likes.includes(action)) return "like";
+    if (t.dislikes && t.dislikes.includes(action)) return "dislike";
+    return null;
+  }
+
+  // Опис фірмової здібності поточного характеру (або null для яйця/без persona).
+  abilityInfo() {
+    if (this.isEgg() || !this.persona) return null;
+    return this._traits().ability || null;
+  }
+
+  // Секунд до готовності здібності (0 = готова).
+  abilityReadyIn() {
+    const since = now() - (this.last_ability || 0);
+    return Math.max(0, ABILITY_COOLDOWN_H * 3600 - since);
+  }
+
+  // Рандомні ефекти для «Капості» Ґремліна: один активний показник вгору, інший вниз.
+  _chaosEffects() {
+    const act = this.activeStats();
+    if (!act.length) return {};
+    const up = act[Math.floor(Math.random() * act.length)];
+    const down = act[Math.floor(Math.random() * act.length)];
+    const e = {};
+    e[up] = 20 + Math.floor(Math.random() * 16); //          +20..35
+    e[down] = (e[down] || 0) - (5 + Math.floor(Math.random() * 11)); // −5..15
+    return e;
+  }
+
+  // Застосувати фірмову здібність. Ефекти лише на активні показники. Повертає
+  // { ok, info, applied } або { ok:false, reason } (none/dead/cooldown).
+  useAbility() {
+    if (!this.alive) return { ok: false, reason: "dead" };
+    const info = this.abilityInfo();
+    if (!info) return { ok: false, reason: "none" };
+    if (this.abilityReadyIn() > 0) return { ok: false, reason: "cooldown", left: this.abilityReadyIn() };
+    this.applyDecay();
+    const effects = info.rand ? this._chaosEffects() : info.effects || {};
+    const act = new Set(this.activeStats());
+    const applied = {};
+    for (const [s, d] of Object.entries(effects)) {
+      if (!act.has(s)) continue;
+      const before = this[s];
+      this[s] = clamp(this[s] + d);
+      applied[s] = Math.round(this[s] - before);
+    }
+    this.last_ability = now();
+    this.counts.ability = (this.counts.ability || 0) + 1;
+    this.interactions += 1;
+    if (STATS.some((s) => this[s] >= 100)) this.flags.maxed = true;
+    return { ok: true, info, applied };
+  }
+
+  // Короткий HTML-блок «класових» рис для /personality (здібність + смаки).
+  personaPerks() {
+    const t = this._traits();
+    if (this.isEgg() || !this.persona) return "";
+    const lines = [];
+    if (t.ability) lines.push(`✨ Здібність: <b>${t.ability.label}</b>`);
+    const nm = (a) => (ACTIONS[a] ? ACTIONS[a].label : a);
+    if (t.likes && t.likes.length) lines.push(`💖 Любить: ${t.likes.map(nm).join(", ")}`);
+    if (t.dislikes && t.dislikes.length) lines.push(`😤 Не любить: ${t.dislikes.map(nm).join(", ")}`);
+    return lines.join("\n");
   }
 
   // Дрейф характеру від догляду (лише у формувальний період).
@@ -463,9 +552,9 @@ export class Pet {
       const nightH = Math.min(elapsedH, nightHoursIn(t0, now()));
       const dayH = elapsedH - nightH;
       const effH = dayH + NIGHT_FACTOR * nightH;
-      // Занепадають лише активні на цій стадії характеристики.
+      // Занепадають лише активні характеристики; швидкість модулюється характером (пасив).
       for (const stat of this.activeStats()) {
-        this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * effH);
+        this[stat] = clamp(this[stat] - (DECAY_PER_HOUR[stat] || 0) * effH * this._decayMult(stat));
       }
       // Поки яйце — накопичуємо середньозважене тепло (для майбутньої вдачі).
       if (wasEgg) {
@@ -494,13 +583,25 @@ export class Pet {
   doAction(action) {
     this.applyDecay();
     const def = ACTIONS[action];
+    // Синергія з характером: основний показник дії резонує (×1.4) або бекфайрить (×0.6).
+    const synergy = this._actionSynergy(action);
+    const primary = def && def.stat;
     for (const [stat, delta] of Object.entries(def ? def.effects : {})) {
-      this[stat] = clamp(this[stat] + delta);
+      let d = delta;
+      if (synergy && stat === primary && d > 0) {
+        d *= synergy === "like" ? SYNERGY_LIKE : SYNERGY_DISLIKE;
+      }
+      this[stat] = clamp(this[stat] + d);
+    }
+    // Бекфайр ще й трохи псує настрій (якщо активний на стадії).
+    if (synergy === "dislike" && this.activeStats().includes("mood")) {
+      this.mood = clamp(this.mood - SYNERGY_MOOD_PENALTY);
     }
     this.counts[action] = (this.counts[action] || 0) + 1;
     this.interactions += 1;
     if (STATS.some((s) => this[s] >= 100)) this.flags.maxed = true;
     this.nudgePersona(ACTION_AFFINITY[action]); // дія ліпить характер
+    return { synergy };
   }
 
   // --- Емоційний стан ------------------------------------------------------
@@ -528,7 +629,8 @@ export class Pet {
     const inten = Math.max(0, Math.min(10, intensity));
     const t = TEMPERAMENT_REACT[this.temperament] || TEMPERAMENT_REACT.balanced;
     const mult = def.valence >= 0 ? t.pos : t.neg;
-    const scaled = (inten / 10) * mult;
+    const emoMult = this._traits().emoMult || 1; // характер може підсилювати емоції (🎬 Драма)
+    const scaled = (inten / 10) * mult * emoMult;
     // Дельти лише на активні показники стадії (з кепом і clamp 0..100).
     const act = new Set(this.activeStats());
     for (const [stat, base] of Object.entries(def.effects)) {
@@ -537,7 +639,7 @@ export class Pet {
       this[stat] = clamp(this[stat] + d);
     }
     this.emotion = emotion;
-    this.emotion_intensity = Math.max(0, Math.min(10, inten * mult));
+    this.emotion_intensity = Math.max(0, Math.min(10, inten * mult * emoMult));
     this.emotion_at = now();
     this.nudgePersona(EMOTION_AFFINITY[emotion]); // емоція ліпить характер
   }
@@ -942,6 +1044,7 @@ export class Pet {
       dialog: this.dialog,
       memories: this.memories,
       rituals: this.rituals,
+      last_ability: this.last_ability,
     };
   }
 }

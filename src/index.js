@@ -75,6 +75,13 @@ function achievementNote(pet, ctx) {
   return "🏆 Нові досягнення:\n" + fresh.map((a) => `${a.emoji} ${a.title}`).join("\n");
 }
 
+// Короткий флейвор-суфікс для тоста дії за синергією з характером.
+function synergyFlavor(synergy) {
+  if (synergy === "like") return "\n💖 обожнює це!";
+  if (synergy === "dislike") return "\n😤 без захвату...";
+  return "";
+}
+
 // Створює таблицю, якщо її ще немає (щоб творцю не запускати міграції вручну).
 async function ensureSchema(env) {
   await env.DB.prepare(
@@ -141,10 +148,14 @@ function mainKeyboard(pet) {
   for (let i = 0; i < actionButtons.length; i += 2) {
     rows.push(actionButtons.slice(i, i + 2));
   }
-  rows.push([
+  const actionRow = [
     { text: "🎲 Подія", callback_data: "evt" },
     { text: "🌱 Ріст", callback_data: "grow" },
-  ]);
+  ];
+  // Фірмова здібність характеру (лише після вилуплення) — окрема кнопка.
+  const ab = pet.isEgg() ? null : pet.abilityInfo();
+  if (ab) actionRow.unshift({ text: ab.label, callback_data: "abil" });
+  rows.push(actionRow);
   const infoRow = [
     { text: "🏆 Досягнення", callback_data: "ach" },
     { text: "📖 Гайд", callback_data: "guide" },
@@ -318,10 +329,12 @@ async function handleUpdate(env, update) {
     const status = pet.persona_locked
       ? "Він уже <b>остаточно сформувався</b> й не зміниться."
       : "Зараз він <b>формується</b> 🌀 — твій догляд ще може його змінити (аж до стадії 😈).";
+    const perks = pet.personaPerks();
     return void (await send(
       env,
       chatId,
-      `🎭 Мій характер: <b>${pet.personalityLabel()}</b>\n\n${status}`
+      `🎭 Мій характер: <b>${pet.personalityLabel()}</b>\n\n${status}` +
+        (perks ? `\n\n${perks}` : "")
     ));
   }
 
@@ -349,12 +362,12 @@ async function handleUpdate(env, update) {
     if (!pet.stageActions().includes(action)) {
       return void (await send(env, chatId, "🤔 Зараз ця дія мені ще недоступна — підрости 🌱"));
     }
-    pet.doAction(action);
+    const res = pet.doAction(action);
     const dp = dpart(env);
     const note = achievementNote(pet, { dayPart: dp });
     await db.save(env, chatId, pet);
     const body =
-      `${ACTIONS[action].toast}\n\n${pet.statusCard({ dayPart: dp })}` +
+      `${ACTIONS[action].toast}${synergyFlavor(res.synergy)}\n\n${pet.statusCard({ dayPart: dp })}` +
       (note ? `\n\n${note}` : "");
     await send(env, chatId, body, mainKeyboard(pet));
     return;
@@ -446,6 +459,40 @@ async function handleCallback(env, cq) {
     await db.save(env, chatId, pet);
     await answerCb(env, cq.id, "");
     await editCard(env, chatId, messageId, pet.memoryCard(), backKeyboard());
+    return;
+  }
+
+  // Фірмова здібність характеру.
+  if (data === "abil") {
+    const info = pet.abilityInfo();
+    if (!info) {
+      await db.save(env, chatId, pet);
+      await answerCb(env, cq.id, "✨ Здібність зʼявиться після вилуплення 🌱", true);
+      return;
+    }
+    const left = pet.abilityReadyIn();
+    if (left > 0) {
+      await db.save(env, chatId, pet);
+      await answerCb(env, cq.id, `⏳ «${info.label}» ще відпочиває (~${Math.ceil(left / 3600)} год)`, true);
+      return;
+    }
+    const res = pet.useAbility();
+    const parts = [];
+    for (const [s, d] of Object.entries(res.applied || {})) {
+      if (d !== 0) {
+        const [label, em] = STAT_META[s];
+        parts.push(`${em} ${label} ${d > 0 ? "+" : ""}${d}`);
+      }
+    }
+    const effLine = parts.length ? `\n\n📊 ${parts.join(" · ")}` : "";
+    const note = achievementNote(pet, ctx);
+    await db.save(env, chatId, pet);
+    await answerCb(env, cq.id, `${info.toast}${effLine}${note ? `\n\n${note}` : ""}`, true);
+    try {
+      await editCard(env, chatId, messageId, pet.statusCard(ctx), mainKeyboard(pet));
+    } catch (e) {
+      /* "message is not modified" — ігноруємо */
+    }
     return;
   }
 
@@ -555,8 +602,8 @@ async function handleCallback(env, cq) {
     } else if (!pet.stageActions().includes(data)) {
       await answerCb(env, cq.id, "Ще не доступно 🌱");
     } else {
-      pet.doAction(data);
-      toast = ACTIONS[data].toast || "";
+      const res = pet.doAction(data);
+      toast = (ACTIONS[data].toast || "") + synergyFlavor(res.synergy);
     }
   }
   // data === "status" — просто оновлюємо картку.
